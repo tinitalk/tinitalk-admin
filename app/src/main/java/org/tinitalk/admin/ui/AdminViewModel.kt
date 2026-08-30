@@ -38,7 +38,12 @@ import org.tinitalk.admin.server.ServerUserCommandUnavailableException
 import org.tinitalk.admin.server.ServerUserNotFoundException
 import org.tinitalk.admin.server.ServerUserStorageException
 import org.tinitalk.admin.server.ServerUsersReader
+import org.tinitalk.admin.server.TiniTalkHealthChecker
+import org.tinitalk.admin.server.TiniTalkHealthHttpException
+import org.tinitalk.admin.server.TiniTalkHealthInfo
 import org.tinitalk.admin.server.TiniTalkStatusChecker
+import org.tinitalk.admin.server.UnexpectedTiniTalkServiceException
+import org.tinitalk.admin.server.UnhealthyTiniTalkServiceException
 import org.tinitalk.admin.ssh.ImportedKeyReader
 import org.tinitalk.admin.ssh.ImportedSshIdentityException
 import org.tinitalk.admin.ssh.AndroidKeystoreSshIdentityStore
@@ -51,10 +56,14 @@ import org.tinitalk.admin.ssh.SshConnection
 import org.tinitalk.admin.ssh.SshCredential
 import org.tinitalk.admin.ssh.SshFailure
 import org.tinitalk.admin.ssh.SshjAccessChecker
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.UUID
+import javax.net.ssl.SSLException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -102,8 +111,7 @@ data class AdminUiState(
     val route: AdminRoute = AdminRoute.ServerList,
     val servers: List<ServerRecord> = emptyList(),
     val addServer: AddServerState = AddServerState(),
-    val sshCheckInProgress: Boolean = false,
-    val sshCheckResult: SshCheckResult? = null,
+    val serverConnectivity: ServerConnectivityUiState = ServerConnectivityUiState(),
     val serverOperation: RunningServerOperation? = null,
     val initialSetup: InitialSetupUiState = InitialSetupUiState(),
     val serverUsers: ServerUsersUiState = ServerUsersUiState(),
@@ -194,6 +202,30 @@ data class SshCheckResult(
     val architecture: String,
 )
 
+sealed interface SshConnectivityStatus {
+    data object Checking : SshConnectivityStatus
+    data class Available(val details: SshCheckResult) : SshConnectivityStatus
+    data class Unavailable(val message: String) : SshConnectivityStatus
+}
+
+sealed interface TiniTalkApiConnectivityStatus {
+    data object Checking : TiniTalkApiConnectivityStatus
+    data class Available(val details: TiniTalkHealthInfo) : TiniTalkApiConnectivityStatus
+    data class Unavailable(val message: String) : TiniTalkApiConnectivityStatus
+}
+
+data class ServerConnectivityUiState(
+    val visible: Boolean = false,
+    val ssh: SshConnectivityStatus = SshConnectivityStatus.Checking,
+    val api: TiniTalkApiConnectivityStatus = TiniTalkApiConnectivityStatus.Checking,
+) {
+    val inProgress: Boolean
+        get() = visible && (
+            ssh is SshConnectivityStatus.Checking ||
+                api is TiniTalkApiConnectivityStatus.Checking
+            )
+}
+
 class AdminViewModel(
     private val contentResolver: ContentResolver,
     private val serverStore: ServerStore,
@@ -206,6 +238,7 @@ class AdminViewModel(
     private val tinitalkStatusChecker: TiniTalkStatusChecker,
     private val initialSetupInspector: InitialSetupInspector,
     private val serverUsersReader: ServerUsersReader,
+    private val tinitalkHealthChecker: TiniTalkHealthChecker,
     private val remoteOperationRunner: RemoteServerOperationRunner,
 ) : ViewModel() {
     private val initialServers = runCatching(serverStore::list)
@@ -221,7 +254,7 @@ class AdminViewModel(
 
     private var operationId = 0L
     private var currentJob: Job? = null
-    private var sshCheckJob: Job? = null
+    private var serverConnectivityJob: Job? = null
     private var serverUsersJob: Job? = null
     private var addServerUserJob: Job? = null
     private var deleteServerUserJob: Job? = null
@@ -265,8 +298,8 @@ class AdminViewModel(
 
     fun openServer(serverId: String) {
         if (mutableState.value.servers.none { it.id == serverId }) return
-        sshCheckJob?.cancel()
-        sshCheckJob = null
+        serverConnectivityJob?.cancel()
+        serverConnectivityJob = null
         val savedSetup = runCatching { serverSetupStore.get(serverId) }.getOrNull()
         val setupState = when {
             savedSetup?.configured == true -> InitialSetupUiState(InitialSetupUiMode.CONFIGURED)
@@ -280,8 +313,7 @@ class AdminViewModel(
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerDetails(serverId),
-                sshCheckInProgress = false,
-                sshCheckResult = null,
+                serverConnectivity = ServerConnectivityUiState(),
                 initialSetup = setupState,
                 notice = null,
             )
@@ -290,8 +322,8 @@ class AdminViewModel(
     }
 
     fun closeServer() {
-        sshCheckJob?.cancel()
-        sshCheckJob = null
+        serverConnectivityJob?.cancel()
+        serverConnectivityJob = null
         serverUsersJob?.cancel()
         serverUsersJob = null
         addServerUserJob?.cancel()
@@ -308,8 +340,7 @@ class AdminViewModel(
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerList,
-                sshCheckInProgress = false,
-                sshCheckResult = null,
+                serverConnectivity = ServerConnectivityUiState(),
                 serverUsers = ServerUsersUiState(),
                 addServerUser = AddServerUserState(),
                 serverUserDetails = ServerUserDetailsUiState(),
@@ -957,40 +988,72 @@ class AdminViewModel(
         }
     }
 
-    fun checkServerSsh(serverId: String) {
-        if (sshCheckJob?.isActive == true) return
+    fun checkServerConnectivity(serverId: String) {
+        if (serverConnectivityJob?.isActive == true) return
         val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
         mutableState.update {
-            it.copy(sshCheckInProgress = true, sshCheckResult = null, notice = null)
+            it.copy(
+                serverConnectivity = ServerConnectivityUiState(visible = true),
+                notice = null,
+            )
         }
-        sshCheckJob = viewModelScope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) { runSshCheck(server) }
-                if (mutableState.value.route == AdminRoute.ServerDetails(serverId)) {
-                    mutableState.update {
-                        it.copy(sshCheckInProgress = false, sshCheckResult = result)
+        val job = viewModelScope.launch {
+            coroutineScope {
+                launch {
+                    val status = try {
+                        val result = withContext(Dispatchers.IO) { runSshCheck(server) }
+                        SshConnectivityStatus.Available(result)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        SshConnectivityStatus.Unavailable(sshCheckErrorMessage(error))
+                    }
+                    if (serverConnectivityIsVisible(serverId)) {
+                        mutableState.update { state ->
+                            state.copy(
+                                serverConnectivity = state.serverConnectivity.copy(ssh = status),
+                            )
+                        }
                     }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (mutableState.value.route == AdminRoute.ServerDetails(serverId)) {
-                    mutableState.update {
-                        it.copy(
-                            sshCheckInProgress = false,
-                            notice = sshCheckErrorMessage(error),
+                launch {
+                    val status = try {
+                        val result = tinitalkHealthChecker.check(server.enteredAddress)
+                        TiniTalkApiConnectivityStatus.Available(result)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        TiniTalkApiConnectivityStatus.Unavailable(
+                            tinitalkApiCheckErrorMessage(error),
                         )
                     }
+                    if (serverConnectivityIsVisible(serverId)) {
+                        mutableState.update { state ->
+                            state.copy(
+                                serverConnectivity = state.serverConnectivity.copy(api = status),
+                            )
+                        }
+                    }
                 }
-            } finally {
-                sshCheckJob = null
             }
+        }
+        serverConnectivityJob = job
+        job.invokeOnCompletion {
+            if (serverConnectivityJob === job) serverConnectivityJob = null
         }
     }
 
-    fun dismissSshCheckResult() {
-        mutableState.update { it.copy(sshCheckResult = null) }
+    fun dismissServerConnectivity() {
+        serverConnectivityJob?.cancel()
+        serverConnectivityJob = null
+        mutableState.update {
+            it.copy(serverConnectivity = ServerConnectivityUiState())
+        }
     }
+
+    private fun serverConnectivityIsVisible(serverId: String): Boolean =
+        mutableState.value.route == AdminRoute.ServerDetails(serverId) &&
+            mutableState.value.serverConnectivity.visible
 
     fun checkInitialSetup(serverId: String) {
         inspectInitialSetup(serverId, continuation = InitialSetupContinuation.NONE)
@@ -1545,8 +1608,18 @@ class AdminViewModel(
     private fun sshCheckErrorMessage(error: Exception): String = when (error) {
         is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
         is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        else -> "Не удалось проверить SSH-доступ"
+        is SshFailure.Timeout -> "SSH: сервер не ответил вовремя"
+        else -> "SSH-доступ недоступен"
+    }
+
+    private fun tinitalkApiCheckErrorMessage(error: Exception): String = when (error) {
+        is UnexpectedTiniTalkServiceException -> "По этому адресу нет сервера TiniTalk"
+        is UnhealthyTiniTalkServiceException -> "Сервер TiniTalk сообщил о недоступности"
+        is TiniTalkHealthHttpException -> "HTTPS вернул код ${error.statusCode}"
+        is SSLException -> "Не удалось проверить TLS-сертификат сервера"
+        is SocketTimeoutException -> "Сервер не ответил по HTTPS вовремя"
+        is UnknownHostException -> "Не удалось найти адрес сервера"
+        else -> "Сервер TiniTalk недоступен по HTTPS"
     }
 
     private fun setupErrorMessage(error: Exception): String = when (error) {
@@ -1981,6 +2054,7 @@ class AdminViewModel(
                         tinitalkStatusChecker = TiniTalkStatusChecker(applicationContext),
                         initialSetupInspector = InitialSetupInspector(applicationContext),
                         serverUsersReader = ServerUsersReader(),
+                        tinitalkHealthChecker = TiniTalkHealthChecker(),
                         remoteOperationRunner = RemoteServerOperationRunner(applicationContext),
                     ) as T
                 }

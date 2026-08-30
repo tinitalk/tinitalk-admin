@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -61,8 +62,7 @@ import kotlinx.coroutines.delay
 fun ServerDetailsScreen(
     server: ServerRecord,
     snackbarHostState: SnackbarHostState,
-    sshCheckInProgress: Boolean,
-    sshCheckResult: SshCheckResult?,
+    serverConnectivity: ServerConnectivityUiState,
     initialSetup: InitialSetupUiState,
     tinitalkFiles: TiniTalkFilesState,
     serverOperationStartedAt: Long?,
@@ -70,8 +70,8 @@ fun ServerDetailsScreen(
     onBack: () -> Unit,
     onRename: (String) -> Unit,
     onRemove: () -> Unit,
-    onCheckSsh: () -> Unit,
-    onDismissSshCheckResult: () -> Unit,
+    onCheckConnectivity: () -> Unit,
+    onDismissConnectivity: () -> Unit,
     onCheckInitialSetup: () -> Unit,
     onOpenUsers: () -> Unit,
     onCheckAndContinueInitialSetup: () -> Unit,
@@ -98,7 +98,7 @@ fun ServerDetailsScreen(
     }
     val setupBusy = initialSetup.mode == InitialSetupUiMode.CHECKING ||
         initialSetup.mode == InitialSetupUiMode.RUNNING
-    val actionsEnabled = !sshCheckInProgress && !serverOperationInProgress && !setupBusy
+    val actionsEnabled = !serverConnectivity.inProgress && !serverOperationInProgress && !setupBusy
 
     LaunchedEffect(renameDialogVisible) {
         if (renameDialogVisible) {
@@ -211,10 +211,10 @@ fun ServerDetailsScreen(
                             value = server.enteredAddress,
                             modifier = Modifier.weight(1f),
                         )
-                        SshCheckIconButton(
-                            inProgress = sshCheckInProgress,
+                        ServerCheckIconButton(
+                            inProgress = serverConnectivity.inProgress,
                             enabled = actionsEnabled,
-                            onClick = onCheckSsh,
+                            onClick = onCheckConnectivity,
                         )
                     }
                     Row(
@@ -352,31 +352,173 @@ fun ServerDetailsScreen(
         )
     }
 
-    sshCheckResult?.let { result ->
+    if (serverConnectivity.visible) {
         AlertDialog(
-            onDismissRequest = onDismissSshCheckResult,
-            title = { Text("SSH-доступ работает") },
+            onDismissRequest = onDismissConnectivity,
+            title = { Text("Доступность сервера") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    ServerProperty("Пользователь", result.user, highlightValue = true)
-                    ServerProperty("Сервер", result.host, highlightValue = true)
-                    ServerProperty("Время работы", result.uptime, highlightValue = true)
-                    ServerProperty(
-                        "Операционная система",
-                        result.operatingSystem,
-                        highlightValue = true,
-                    )
-                    ServerProperty("Архитектура", result.architecture, highlightValue = true)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SshConnectivitySection(serverConnectivity.ssh)
+                    TiniTalkApiConnectivitySection(serverConnectivity.api)
                 }
             },
             confirmButton = {
-                TextButton(onClick = onDismissSshCheckResult) {
+                TextButton(onClick = onDismissConnectivity) {
                     Text("Закрыть")
                 }
             },
         )
     }
 
+}
+
+@Composable
+private fun SshConnectivitySection(status: SshConnectivityStatus) {
+    ConnectivitySection {
+        when (status) {
+            SshConnectivityStatus.Checking -> ConnectivityStatusRow(
+                message = "Проверяем SSH-доступ…",
+                checking = true,
+            )
+            is SshConnectivityStatus.Unavailable -> ConnectivityStatusRow(
+                message = status.message,
+                available = false,
+            )
+            is SshConnectivityStatus.Available -> {
+                ConnectivityStatusRow(message = "SSH-доступ работает", available = true)
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ServerProperty(
+                        "Пользователь",
+                        status.details.user,
+                        modifier = Modifier.weight(1f),
+                        highlightValue = true,
+                    )
+                    ServerProperty(
+                        "Сервер",
+                        status.details.host,
+                        modifier = Modifier.weight(1f),
+                        highlightValue = true,
+                    )
+                }
+                ServerProperty("Время работы", status.details.uptime, highlightValue = true)
+                ServerProperty(
+                    "Операционная система",
+                    status.details.operatingSystem,
+                    highlightValue = true,
+                )
+                ServerProperty(
+                    "Архитектура",
+                    status.details.architecture,
+                    highlightValue = true,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TiniTalkApiConnectivitySection(status: TiniTalkApiConnectivityStatus) {
+    ConnectivitySection {
+        when (status) {
+            TiniTalkApiConnectivityStatus.Checking -> ConnectivityStatusRow(
+                message = "Проверяем TiniTalk API по HTTPS…",
+                checking = true,
+            )
+            is TiniTalkApiConnectivityStatus.Unavailable -> ConnectivityStatusRow(
+                message = status.message,
+                available = false,
+            )
+            is TiniTalkApiConnectivityStatus.Available -> {
+                ConnectivityStatusRow(message = "Сервер TiniTalk доступен", available = true)
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ServerProperty(
+                        "Версия API",
+                        status.details.apiVersion?.toString() ?: "Не указана",
+                        modifier = Modifier.weight(1f),
+                        highlightValue = true,
+                    )
+                    ServerProperty(
+                        "Коммит",
+                        status.details.commit ?: "Не указан",
+                        modifier = Modifier.weight(1f),
+                        highlightValue = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectivitySection(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(14.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun ConnectivityStatusRow(
+    message: String,
+    checking: Boolean = false,
+    available: Boolean = false,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (checking) {
+            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+        } else {
+            val color = if (available) AccessVerifiedGreen else MaterialTheme.colorScheme.error
+            val iconForeground = MaterialTheme.colorScheme.surface
+            Canvas(modifier = Modifier.size(20.dp)) {
+                drawCircle(color = color)
+                if (available) {
+                    val stroke = Stroke(
+                        width = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    )
+                    val check = Path().apply {
+                        moveTo(size.width * 0.25f, size.height * 0.52f)
+                        lineTo(size.width * 0.43f, size.height * 0.69f)
+                        lineTo(size.width * 0.76f, size.height * 0.34f)
+                    }
+                    drawPath(check, color = iconForeground, style = stroke)
+                } else {
+                    val strokeWidth = 2.dp.toPx()
+                    drawLine(
+                        color = iconForeground,
+                        start = androidx.compose.ui.geometry.Offset(size.width * 0.32f, size.height * 0.32f),
+                        end = androidx.compose.ui.geometry.Offset(size.width * 0.68f, size.height * 0.68f),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = iconForeground,
+                        start = androidx.compose.ui.geometry.Offset(size.width * 0.68f, size.height * 0.32f),
+                        end = androidx.compose.ui.geometry.Offset(size.width * 0.32f, size.height * 0.68f),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
+        Text(
+            text = message,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
 
 @Composable
@@ -591,7 +733,7 @@ private fun InitialSetupStepRow(
 }
 
 @Composable
-private fun SshCheckIconButton(
+private fun ServerCheckIconButton(
     inProgress: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -608,7 +750,7 @@ private fun SshCheckIconButton(
             Canvas(
                 modifier = Modifier
                     .size(24.dp)
-                    .semantics { contentDescription = "Проверить SSH" },
+                    .semantics { contentDescription = "Проверить доступность сервера" },
             ) {
                 val stroke = Stroke(
                     width = 2.dp.toPx(),

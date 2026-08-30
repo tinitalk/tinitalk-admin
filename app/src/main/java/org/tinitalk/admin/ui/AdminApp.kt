@@ -125,8 +125,7 @@ fun AdminApp(viewModel: AdminViewModel) {
                         ServerDetailsScreen(
                                 server = server,
                                 snackbarHostState = snackbarHostState,
-                                sshCheckInProgress = state.sshCheckInProgress,
-                                sshCheckResult = state.sshCheckResult,
+                                serverConnectivity = state.serverConnectivity,
                                 initialSetup = state.initialSetup,
                                 tinitalkFiles = state.tinitalkFiles,
                                 serverOperationStartedAt = runningOperation?.startedAt
@@ -135,8 +134,10 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 onBack = viewModel::closeServer,
                                 onRename = { viewModel.renameServer(server.id, it) },
                                 onRemove = { viewModel.removeServer(server.id) },
-                                onCheckSsh = { viewModel.checkServerSsh(server.id) },
-                                onDismissSshCheckResult = viewModel::dismissSshCheckResult,
+                                onCheckConnectivity = {
+                                    viewModel.checkServerConnectivity(server.id)
+                                },
+                                onDismissConnectivity = viewModel::dismissServerConnectivity,
                                 onCheckInitialSetup = {
                                     viewModel.checkInitialSetup(server.id)
                                 },

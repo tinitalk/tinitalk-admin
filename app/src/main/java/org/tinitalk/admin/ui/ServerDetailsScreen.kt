@@ -2,6 +2,8 @@ package org.tinitalk.admin.ui
 
 import android.os.SystemClock
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,10 +11,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -43,12 +43,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.tinitalk.admin.model.ServerRecord
-import org.tinitalk.admin.server.TiniTalkServiceState
-import org.tinitalk.admin.server.TiniTalkStatus
+import org.tinitalk.admin.server.InitialSetupStep
+import org.tinitalk.admin.ui.theme.AccessVerifiedGreen
 import kotlinx.coroutines.delay
 
 @Composable
@@ -57,14 +63,7 @@ fun ServerDetailsScreen(
     snackbarHostState: SnackbarHostState,
     sshCheckInProgress: Boolean,
     sshCheckResult: SshCheckResult?,
-    tinitalkStatusInProgress: Boolean,
-    tinitalkStatusResult: TiniTalkStatus?,
-    systemPackagesInstallInProgress: Boolean,
-    firewallConfigureInProgress: Boolean,
-    tlsCertificateInProgress: Boolean,
-    tinitalkPrepareInProgress: Boolean,
-    tinitalkFilesInstallInProgress: Boolean,
-    tinitalkStartInProgress: Boolean,
+    initialSetup: InitialSetupUiState,
     tinitalkFiles: TiniTalkFilesState,
     serverOperationStartedAt: Long?,
     serverOperationInProgress: Boolean,
@@ -73,19 +72,15 @@ fun ServerDetailsScreen(
     onRemove: () -> Unit,
     onCheckSsh: () -> Unit,
     onDismissSshCheckResult: () -> Unit,
-    onCheckTiniTalkStatus: () -> Unit,
-    onDismissTiniTalkStatus: () -> Unit,
-    onInstallSystemPackages: () -> Unit,
-    onConfigureFirewall: () -> Unit,
-    onObtainTlsCertificate: () -> Unit,
-    onPrepareTiniTalk: () -> Unit,
-    onOpenTiniTalkFiles: () -> Unit,
+    onCheckInitialSetup: () -> Unit,
+    onCheckAndContinueInitialSetup: () -> Unit,
+    onContinueInitialSetup: () -> Unit,
+    onRetryInitialSetup: () -> Unit,
     onCloseTiniTalkFiles: () -> Unit,
     onChooseTiniTalkBinary: () -> Unit,
     onChooseFirebaseAndroidConfig: () -> Unit,
     onChooseFirebaseServiceAccount: () -> Unit,
-    onInstallTiniTalkFiles: () -> Unit,
-    onStartTiniTalk: () -> Unit,
+    onStartInitialSetup: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var renameDialogVisible by rememberSaveable(server.id) { mutableStateOf(false) }
@@ -97,6 +92,12 @@ fun ServerDetailsScreen(
     var serverOperationElapsedSeconds by remember(serverOperationStartedAt) {
         mutableLongStateOf(serverOperationStartedAt.elapsedSeconds())
     }
+    var setupElapsedSeconds by remember(initialSetup.startedAtEpochMillis) {
+        mutableLongStateOf(initialSetup.startedAtEpochMillis.setupElapsedSeconds())
+    }
+    val setupBusy = initialSetup.mode == InitialSetupUiMode.CHECKING ||
+        initialSetup.mode == InitialSetupUiMode.RUNNING
+    val actionsEnabled = !sshCheckInProgress && !serverOperationInProgress && !setupBusy
 
     LaunchedEffect(renameDialogVisible) {
         if (renameDialogVisible) {
@@ -110,6 +111,15 @@ fun ServerDetailsScreen(
         while (true) {
             serverOperationElapsedSeconds =
                 ((SystemClock.elapsedRealtime() - startedAt) / 1_000).coerceAtLeast(0)
+            delay(1_000)
+        }
+    }
+
+    LaunchedEffect(initialSetup.startedAtEpochMillis) {
+        val startedAt = initialSetup.startedAtEpochMillis ?: return@LaunchedEffect
+        while (true) {
+            setupElapsedSeconds =
+                ((System.currentTimeMillis() - startedAt) / 1_000).coerceAtLeast(0)
             delay(1_000)
         }
     }
@@ -191,7 +201,21 @@ fun ServerDetailsScreen(
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                     modifier = Modifier.padding(18.dp),
                 ) {
-                    ServerProperty("Адрес", server.enteredAddress)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        ServerProperty(
+                            label = "Адрес",
+                            value = server.enteredAddress,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SshCheckIconButton(
+                            inProgress = sshCheckInProgress,
+                            enabled = actionsEnabled,
+                            onClick = onCheckSsh,
+                        )
+                    }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(18.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -209,189 +233,27 @@ fun ServerDetailsScreen(
                     }
                 }
             }
-            OutlinedButton(
-                onClick = onCheckSsh,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (sshCheckInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(if (sshCheckInProgress) "Проверяем SSH-доступ…" else "Проверить SSH")
-            }
-            OutlinedButton(
-                onClick = onCheckTiniTalkStatus,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (tinitalkStatusInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(if (tinitalkStatusInProgress) "Проверяем TiniTalk…" else "Статус TiniTalk")
-            }
-            OutlinedButton(
-                onClick = onInstallSystemPackages,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (systemPackagesInstallInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(
-                    if (systemPackagesInstallInProgress) {
-                        "Установка пакетов · ${serverOperationElapsedSeconds.asElapsedTime()}"
-                    } else {
-                        "Установить системные пакеты"
-                    },
-                )
-            }
-            OutlinedButton(
-                onClick = onConfigureFirewall,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (firewallConfigureInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(
-                    if (firewallConfigureInProgress) {
-                        "Настройка firewall · ${serverOperationElapsedSeconds.asElapsedTime()}"
-                    } else {
-                        "Настроить firewall"
-                    },
-                )
-            }
-            OutlinedButton(
-                onClick = onObtainTlsCertificate,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (tlsCertificateInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(
-                    if (tlsCertificateInProgress) {
-                        "Получение TLS · ${serverOperationElapsedSeconds.asElapsedTime()}"
-                    } else {
-                        "Получить TLS-сертификат"
-                    },
-                )
-            }
-            OutlinedButton(
-                onClick = onPrepareTiniTalk,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (tinitalkPrepareInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(
-                    if (tinitalkPrepareInProgress) {
-                        "Подготовка TiniTalk · ${serverOperationElapsedSeconds.asElapsedTime()}"
-                    } else {
-                        "Подготовить TiniTalk"
-                    },
-                )
-            }
-            OutlinedButton(
-                onClick = onOpenTiniTalkFiles,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (tinitalkFilesInstallInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(
-                    if (tinitalkFilesInstallInProgress) {
-                        "Загрузка файлов · ${serverOperationElapsedSeconds.asElapsedTime()}"
-                    } else {
-                        "Загрузить файлы"
-                    },
-                )
-            }
-            OutlinedButton(
-                onClick = onStartTiniTalk,
-                enabled = !sshCheckInProgress && !tinitalkStatusInProgress &&
-                    !serverOperationInProgress,
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (tinitalkStartInProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Box(Modifier.width(10.dp))
-                }
-                Text(
-                    if (tinitalkStartInProgress) {
-                        "Запуск TiniTalk · ${serverOperationElapsedSeconds.asElapsedTime()}"
-                    } else {
-                        "Запустить TiniTalk"
-                    },
-                )
-            }
+            InitialSetupCard(
+                state = initialSetup,
+                setupElapsedSeconds = setupElapsedSeconds,
+                stepElapsedSeconds = serverOperationElapsedSeconds,
+                onCheck = onCheckInitialSetup,
+                onCheckAndStart = onCheckAndContinueInitialSetup,
+                onStart = onContinueInitialSetup,
+                onRetry = onRetryInitialSetup,
+                actionsEnabled = actionsEnabled,
+            )
         }
     }
 
     if (tinitalkFiles.visible) {
         AlertDialog(
             onDismissRequest = onCloseTiniTalkFiles,
-            title = { Text("Загрузить файлы") },
+            title = { Text("Первичная настройка") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     FileSelectionButton(
-                        label = "Бинарник TiniTalk",
+                        label = "Бинарник TiniTalk Server",
                         fileName = tinitalkFiles.binaryName,
                         onClick = onChooseTiniTalkBinary,
                     )
@@ -409,10 +271,10 @@ fun ServerDetailsScreen(
             },
             confirmButton = {
                 TextButton(
-                    onClick = onInstallTiniTalkFiles,
+                    onClick = onStartInitialSetup,
                     enabled = tinitalkFiles.ready,
                 ) {
-                    Text("Загрузить")
+                    Text("Начать")
                 }
             },
             dismissButton = {
@@ -491,6 +353,12 @@ fun ServerDetailsScreen(
                     ServerProperty("Пользователь", result.user, highlightValue = true)
                     ServerProperty("Сервер", result.host, highlightValue = true)
                     ServerProperty("Время работы", result.uptime, highlightValue = true)
+                    ServerProperty(
+                        "Операционная система",
+                        result.operatingSystem,
+                        highlightValue = true,
+                    )
+                    ServerProperty("Архитектура", result.architecture, highlightValue = true)
                 }
             },
             confirmButton = {
@@ -501,38 +369,271 @@ fun ServerDetailsScreen(
         )
     }
 
-    tinitalkStatusResult?.let { result ->
-        AlertDialog(
-            onDismissRequest = onDismissTiniTalkStatus,
-            title = { Text("Статус TiniTalk") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+}
+
+@Composable
+private fun InitialSetupCard(
+    state: InitialSetupUiState,
+    setupElapsedSeconds: Long,
+    stepElapsedSeconds: Long,
+    onCheck: () -> Unit,
+    onCheckAndStart: () -> Unit,
+    onStart: () -> Unit,
+    onRetry: () -> Unit,
+    actionsEnabled: Boolean,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.78f),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(18.dp),
+        ) {
+            when (state.mode) {
+                InitialSetupUiMode.UNKNOWN -> {
+                    Text("Сервер не настроен", style = MaterialTheme.typography.titleMedium)
+                    SetupActionButton("Запустить настройку", actionsEnabled, onCheckAndStart)
+                }
+
+                InitialSetupUiMode.CHECKING -> Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    Text("Проверяем сервер…", style = MaterialTheme.typography.titleMedium)
+                }
+
+                InitialSetupUiMode.CLEAN -> {
+                    Text("Сервер чистый", style = MaterialTheme.typography.titleMedium)
+                    SetupActionButton("Запустить первичную настройку", actionsEnabled, onStart)
+                }
+
+                InitialSetupUiMode.PARTIAL -> {
+                    Text("Настройка не завершена", style = MaterialTheme.typography.titleMedium)
+                    InitialSetupStep.entries.forEach { step ->
+                        InitialSetupStepRow(
+                            step = step,
+                            currentStep = null,
+                            running = false,
+                            completedSteps = state.completedSteps,
+                            stepElapsedSeconds = 0,
+                        )
+                    }
+                    SetupActionButton("Продолжить настройку", actionsEnabled, onStart)
+                }
+
+                InitialSetupUiMode.RUNNING,
+                InitialSetupUiMode.FAILED,
+                -> {
                     Text(
-                        text = result.summary(),
+                        text = if (state.mode == InitialSetupUiMode.RUNNING) {
+                            "Идёт настройка сервера · " +
+                                setupElapsedSeconds.asElapsedTime()
+                        } else {
+                            "Настройка остановлена"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    ServerProperty("Операционная система", result.os, highlightValue = true)
-                    ServerProperty("Архитектура", result.architecture, highlightValue = true)
-                    ServerProperty(
-                        "Бинарник",
-                        if (result.binaryInstalled) "Установлен" else "Не найден",
-                        highlightValue = true,
-                    )
-                    ServerProperty("Сервис", result.service.displayName(), highlightValue = true)
-                    ServerProperty(
-                        "Данные",
-                        if (result.dataDirectoryPresent) "Каталог существует" else "Каталог не найден",
-                        highlightValue = true,
-                    )
+                    InitialSetupStep.entries.forEach { step ->
+                        InitialSetupStepRow(
+                            step = step,
+                            currentStep = state.currentStep,
+                            running = state.mode == InitialSetupUiMode.RUNNING,
+                            completedSteps = state.completedSteps,
+                            stepElapsedSeconds = stepElapsedSeconds,
+                        )
+                    }
+                    state.errorMessage?.let {
+                        Text(
+                            text = it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    if (state.mode == InitialSetupUiMode.FAILED) {
+                        SetupActionButton("Повторить", actionsEnabled, onRetry)
+                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = onDismissTiniTalkStatus) {
-                    Text("Закрыть")
+
+                InitialSetupUiMode.CONFIGURED -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "Сервер настроен",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        RefreshStatusIconButton(
+                            enabled = actionsEnabled,
+                            onClick = onCheck,
+                        )
+                    }
                 }
-            },
+            }
+        }
+    }
+}
+
+@Composable
+private fun RefreshStatusIconButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val color = if (enabled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Canvas(
+        modifier = Modifier
+            .size(24.dp)
+            .semantics { contentDescription = "Проверить состояние сервера" }
+            .clickable(enabled = enabled, onClick = onClick),
+    ) {
+        val stroke = Stroke(
+            width = 2.2.dp.toPx(),
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
         )
+        val arrows = Path().apply {
+            moveTo(size.width * 0.79f, size.height * 0.38f)
+            cubicTo(
+                size.width * 0.68f,
+                size.height * 0.17f,
+                size.width * 0.38f,
+                size.height * 0.14f,
+                size.width * 0.22f,
+                size.height * 0.35f,
+            )
+            moveTo(size.width * 0.22f, size.height * 0.20f)
+            lineTo(size.width * 0.22f, size.height * 0.36f)
+            lineTo(size.width * 0.38f, size.height * 0.36f)
+
+            moveTo(size.width * 0.21f, size.height * 0.62f)
+            cubicTo(
+                size.width * 0.32f,
+                size.height * 0.83f,
+                size.width * 0.62f,
+                size.height * 0.86f,
+                size.width * 0.78f,
+                size.height * 0.65f,
+            )
+            moveTo(size.width * 0.78f, size.height * 0.80f)
+            lineTo(size.width * 0.78f, size.height * 0.64f)
+            lineTo(size.width * 0.62f, size.height * 0.64f)
+        }
+        drawPath(path = arrows, color = color, style = stroke)
+    }
+}
+
+@Composable
+private fun InitialSetupStepRow(
+    step: InitialSetupStep,
+    currentStep: InitialSetupStep?,
+    running: Boolean,
+    completedSteps: Set<InitialSetupStep>,
+    stepElapsedSeconds: Long,
+) {
+    val completed = step in completedSteps ||
+        (currentStep != null && step.ordinal < currentStep.ordinal)
+    val current = step == currentStep
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        when {
+            completed -> Text(
+                text = "✓",
+                color = AccessVerifiedGreen,
+                fontWeight = FontWeight.Bold,
+            )
+            current && running -> CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
+            current -> Text("!", color = MaterialTheme.colorScheme.error)
+            else -> Text("○", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(
+            text = buildString {
+                append(step.displayName())
+                if (current && running) {
+                    append(" · ").append(stepElapsedSeconds.asElapsedTime())
+                }
+            },
+            color = if (current || completed) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+}
+
+@Composable
+private fun SshCheckIconButton(
+    inProgress: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        if (inProgress) {
+            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+        } else {
+            val color = if (enabled) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            }
+            Canvas(
+                modifier = Modifier
+                    .size(24.dp)
+                    .semantics { contentDescription = "Проверить SSH" },
+            ) {
+                val stroke = Stroke(
+                    width = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                )
+                drawRoundRect(
+                    color = color,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+                    style = stroke,
+                )
+                val prompt = Path().apply {
+                    moveTo(size.width * 0.24f, size.height * 0.32f)
+                    lineTo(size.width * 0.42f, size.height * 0.5f)
+                    lineTo(size.width * 0.24f, size.height * 0.68f)
+                    moveTo(size.width * 0.5f, size.height * 0.68f)
+                    lineTo(size.width * 0.74f, size.height * 0.68f)
+                }
+                drawPath(prompt, color = color, style = stroke)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupActionButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(label)
     }
 }
 
@@ -563,23 +664,23 @@ private fun Long?.elapsedSeconds(): Long = this?.let {
     ((SystemClock.elapsedRealtime() - it) / 1_000).coerceAtLeast(0)
 } ?: 0
 
+private fun Long?.setupElapsedSeconds(): Long = this?.let {
+    ((System.currentTimeMillis() - it) / 1_000).coerceAtLeast(0)
+} ?: 0
+
 private fun Long.asElapsedTime(): String {
     val minutes = this / 60
     val seconds = this % 60
     return "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
 }
 
-private fun TiniTalkStatus.summary(): String = when {
-    !binaryInstalled -> "TiniTalk не установлен"
-    service == TiniTalkServiceState.RUNNING -> "TiniTalk установлен и работает"
-    service == TiniTalkServiceState.STOPPED -> "TiniTalk установлен, но не запущен"
-    else -> "TiniTalk установлен, сервис не настроен"
-}
-
-private fun TiniTalkServiceState.displayName(): String = when (this) {
-    TiniTalkServiceState.RUNNING -> "Работает"
-    TiniTalkServiceState.STOPPED -> "Остановлен"
-    TiniTalkServiceState.MISSING -> "Не найден"
+private fun InitialSetupStep.displayName(): String = when (this) {
+    InitialSetupStep.SYSTEM_PACKAGES -> "Системные пакеты"
+    InitialSetupStep.FIREWALL -> "Firewall"
+    InitialSetupStep.TLS_CERTIFICATE -> "TLS-сертификат"
+    InitialSetupStep.PREPARE_TINITALK -> "Подготовка TiniTalk"
+    InitialSetupStep.UPLOAD_FILES -> "Загрузка файлов"
+    InitialSetupStep.START_TINITALK -> "Запуск TiniTalk"
 }
 
 @Composable

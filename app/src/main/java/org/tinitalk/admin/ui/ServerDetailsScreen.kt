@@ -73,6 +73,7 @@ fun ServerDetailsScreen(
     onCheckSsh: () -> Unit,
     onDismissSshCheckResult: () -> Unit,
     onCheckInitialSetup: () -> Unit,
+    onOpenUsers: () -> Unit,
     onCheckAndContinueInitialSetup: () -> Unit,
     onContinueInitialSetup: () -> Unit,
     onRetryInitialSetup: () -> Unit,
@@ -243,6 +244,13 @@ fun ServerDetailsScreen(
                 onRetry = onRetryInitialSetup,
                 actionsEnabled = actionsEnabled,
             )
+            if (initialSetup.mode == InitialSetupUiMode.CONFIGURED) {
+                SetupActionButton(
+                    label = "Пользователи",
+                    enabled = actionsEnabled,
+                    onClick = onOpenUsers,
+                )
+            }
         }
     }
 

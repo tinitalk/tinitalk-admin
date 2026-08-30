@@ -65,9 +65,27 @@ fun AdminApp(viewModel: AdminViewModel) {
         when (state.route) {
             AdminRoute.AddServer -> closeAddServer()
             is AdminRoute.ServerDetails -> viewModel.closeServer()
+            is AdminRoute.ServerUsers -> viewModel.closeServerUsers()
+            is AdminRoute.AddServerUser -> viewModel.closeAddServerUser()
+            is AdminRoute.ServerUserDetails -> viewModel.closeServerUser()
             AdminRoute.ServerList -> Unit
         }
     }
+
+    val serverDetailsRoute = when (val route = state.route) {
+        is AdminRoute.ServerDetails -> route
+        is AdminRoute.ServerUsers -> AdminRoute.ServerDetails(route.serverId)
+        is AdminRoute.AddServerUser -> AdminRoute.ServerDetails(route.serverId)
+        is AdminRoute.ServerUserDetails -> AdminRoute.ServerDetails(route.serverId)
+        else -> null
+    }
+    val serverUsersRoute = when (val route = state.route) {
+        is AdminRoute.ServerUsers -> route
+        is AdminRoute.AddServerUser -> AdminRoute.ServerUsers(route.serverId)
+        is AdminRoute.ServerUserDetails -> AdminRoute.ServerUsers(route.serverId)
+        else -> null
+    }
+    val serverUserDetailsRoute = state.route as? AdminRoute.ServerUserDetails
 
     Box(modifier = Modifier.fillMaxSize()) {
         ServerListScreen(
@@ -79,7 +97,7 @@ fun AdminApp(viewModel: AdminViewModel) {
         )
 
         AnimatedContent(
-            targetState = state.route as? AdminRoute.ServerDetails,
+            targetState = serverDetailsRoute,
             transitionSpec = {
                 val animationSpec = tween<IntOffset>(
                     durationMillis = 400,
@@ -122,6 +140,9 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 onCheckInitialSetup = {
                                     viewModel.checkInitialSetup(server.id)
                                 },
+                                onOpenUsers = {
+                                    viewModel.openServerUsers(server.id)
+                                },
                                 onCheckAndContinueInitialSetup = {
                                     viewModel.checkAndContinueInitialSetup(server.id)
                                 },
@@ -154,6 +175,93 @@ fun AdminApp(viewModel: AdminViewModel) {
                         )
                     }
             }
+        }
+
+        AnimatedContent(
+            targetState = serverUsersRoute,
+            transitionSpec = {
+                val animationSpec = tween<IntOffset>(
+                    durationMillis = 400,
+                    easing = FastOutSlowInEasing,
+                )
+                if (targetState != null) {
+                    slideInHorizontally(animationSpec) { fullWidth -> fullWidth }
+                        .togetherWith(ExitTransition.None)
+                } else {
+                    EnterTransition.None.togetherWith(
+                        slideOutHorizontally(animationSpec) { fullWidth -> fullWidth },
+                    )
+                }
+            },
+            label = "serverUsersRoute",
+            modifier = Modifier.fillMaxSize(),
+        ) { route ->
+            if (route == null) {
+                Box(modifier = Modifier.fillMaxSize())
+            } else {
+                ServerUsersScreen(
+                    state = state.serverUsers,
+                    onBack = viewModel::closeServerUsers,
+                    onRetry = viewModel::retryServerUsers,
+                    onAddUser = viewModel::openAddServerUser,
+                    onOpenUser = viewModel::openServerUser,
+                    modifier = Modifier.fillMaxSize().systemBarsPadding(),
+                )
+            }
+        }
+
+        AnimatedContent(
+            targetState = serverUserDetailsRoute,
+            transitionSpec = {
+                val animationSpec = tween<IntOffset>(
+                    durationMillis = 400,
+                    easing = FastOutSlowInEasing,
+                )
+                if (targetState != null) {
+                    slideInHorizontally(animationSpec) { fullWidth -> fullWidth }
+                        .togetherWith(ExitTransition.None)
+                } else {
+                    EnterTransition.None.togetherWith(
+                        slideOutHorizontally(animationSpec) { fullWidth -> fullWidth },
+                    )
+                }
+            },
+            label = "serverUserDetailsRoute",
+            modifier = Modifier.fillMaxSize(),
+        ) { route ->
+            if (route == null) {
+                Box(modifier = Modifier.fillMaxSize())
+            } else {
+                val currentUser = state.serverUsers.users
+                    .firstOrNull { it.login == route.user.login }
+                    ?: route.user
+                ServerUserDetailsScreen(
+                    user = currentUser,
+                    state = state.serverUserDetails,
+                    onBack = viewModel::closeServerUser,
+                    onRotateToken = viewModel::rotateServerUserToken,
+                    onTokenCopied = viewModel::serverUserRotatedTokenCopied,
+                    onChangeAccess = viewModel::changeServerUserAccess,
+                    onOpenRename = viewModel::openServerUserRename,
+                    onCloseRename = viewModel::closeServerUserRename,
+                    onRenameDraftChange = viewModel::updateServerUserRenameDraft,
+                    onRename = viewModel::renameServerUser,
+                    onDelete = viewModel::deleteServerUser,
+                    modifier = Modifier.fillMaxSize().systemBarsPadding(),
+                )
+            }
+        }
+
+        if (state.route is AdminRoute.AddServerUser) {
+            AddServerUserScreen(
+                state = state.addServerUser,
+                onBack = viewModel::closeAddServerUser,
+                onLoginChange = viewModel::updateServerUserLogin,
+                onDisplayNameChange = viewModel::updateServerUserDisplayName,
+                onSubmit = viewModel::submitServerUser,
+                onTokenCopied = viewModel::serverUserTokenCopied,
+                modifier = Modifier.fillMaxSize().systemBarsPadding(),
+            )
         }
 
         if (state.route == AdminRoute.AddServer) {

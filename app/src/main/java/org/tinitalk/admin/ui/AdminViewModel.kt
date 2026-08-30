@@ -31,6 +31,13 @@ import org.tinitalk.admin.server.RemoteServerOperationRunner
 import org.tinitalk.admin.server.ResolvedEndpoint
 import org.tinitalk.admin.server.ServerOperationKind
 import org.tinitalk.admin.server.ServerSetupAssessment
+import org.tinitalk.admin.server.ServerUser
+import org.tinitalk.admin.server.ServerUserAdministrativeAccessException
+import org.tinitalk.admin.server.ServerUserAlreadyExistsException
+import org.tinitalk.admin.server.ServerUserCommandUnavailableException
+import org.tinitalk.admin.server.ServerUserNotFoundException
+import org.tinitalk.admin.server.ServerUserStorageException
+import org.tinitalk.admin.server.ServerUsersReader
 import org.tinitalk.admin.server.TiniTalkStatusChecker
 import org.tinitalk.admin.ssh.ImportedKeyReader
 import org.tinitalk.admin.ssh.ImportedSshIdentityException
@@ -60,6 +67,9 @@ sealed interface AdminRoute {
     data object ServerList : AdminRoute
     data object AddServer : AdminRoute
     data class ServerDetails(val serverId: String) : AdminRoute
+    data class ServerUsers(val serverId: String) : AdminRoute
+    data class AddServerUser(val serverId: String) : AdminRoute
+    data class ServerUserDetails(val serverId: String, val user: ServerUser) : AdminRoute
 }
 
 sealed interface AddServerPhase {
@@ -96,9 +106,43 @@ data class AdminUiState(
     val sshCheckResult: SshCheckResult? = null,
     val serverOperation: RunningServerOperation? = null,
     val initialSetup: InitialSetupUiState = InitialSetupUiState(),
+    val serverUsers: ServerUsersUiState = ServerUsersUiState(),
+    val addServerUser: AddServerUserState = AddServerUserState(),
+    val serverUserDetails: ServerUserDetailsUiState = ServerUserDetailsUiState(),
     val tinitalkFiles: TiniTalkFilesState = TiniTalkFilesState(),
     val notice: String? = null,
 )
+
+data class ServerUsersUiState(
+    val loading: Boolean = false,
+    val users: List<ServerUser> = emptyList(),
+    val errorMessage: String? = null,
+)
+
+data class AddServerUserState(
+    val login: String = "",
+    val displayName: String = "",
+    val submitting: Boolean = false,
+    val loginError: String? = null,
+    val displayNameError: String? = null,
+    val errorMessage: String? = null,
+    val token: String? = null,
+)
+
+data class ServerUserDetailsUiState(
+    val deleting: Boolean = false,
+    val rotatingToken: Boolean = false,
+    val changingAccess: Boolean = false,
+    val renaming: Boolean = false,
+    val renameDialogVisible: Boolean = false,
+    val renameDraft: String = "",
+    val renameErrorMessage: String? = null,
+    val errorMessage: String? = null,
+    val token: String? = null,
+) {
+    val busy: Boolean
+        get() = deleting || rotatingToken || changingAccess || renaming
+}
 
 enum class InitialSetupUiMode {
     UNKNOWN,
@@ -161,6 +205,7 @@ class AdminViewModel(
     private val managedAccessBootstrapper: ManagedAccessBootstrapper,
     private val tinitalkStatusChecker: TiniTalkStatusChecker,
     private val initialSetupInspector: InitialSetupInspector,
+    private val serverUsersReader: ServerUsersReader,
     private val remoteOperationRunner: RemoteServerOperationRunner,
 ) : ViewModel() {
     private val initialServers = runCatching(serverStore::list)
@@ -177,6 +222,12 @@ class AdminViewModel(
     private var operationId = 0L
     private var currentJob: Job? = null
     private var sshCheckJob: Job? = null
+    private var serverUsersJob: Job? = null
+    private var addServerUserJob: Job? = null
+    private var deleteServerUserJob: Job? = null
+    private var rotateServerUserTokenJob: Job? = null
+    private var changeServerUserAccessJob: Job? = null
+    private var renameServerUserJob: Job? = null
     private var serverOperationJob: Job? = null
     private var pendingEndpoint: ResolvedEndpoint? = null
     private var pendingHostKey: PinnedHostKey? = null
@@ -241,15 +292,668 @@ class AdminViewModel(
     fun closeServer() {
         sshCheckJob?.cancel()
         sshCheckJob = null
+        serverUsersJob?.cancel()
+        serverUsersJob = null
+        addServerUserJob?.cancel()
+        addServerUserJob = null
+        deleteServerUserJob?.cancel()
+        deleteServerUserJob = null
+        rotateServerUserTokenJob?.cancel()
+        rotateServerUserTokenJob = null
+        changeServerUserAccessJob?.cancel()
+        changeServerUserAccessJob = null
+        renameServerUserJob?.cancel()
+        renameServerUserJob = null
         discardSelectedTiniTalkFiles()
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerList,
                 sshCheckInProgress = false,
                 sshCheckResult = null,
+                serverUsers = ServerUsersUiState(),
+                addServerUser = AddServerUserState(),
+                serverUserDetails = ServerUserDetailsUiState(),
                 tinitalkFiles = TiniTalkFilesState(),
                 initialSetup = InitialSetupUiState(),
             )
+        }
+    }
+
+    fun openServerUsers(serverId: String) {
+        val currentState = mutableState.value
+        if (
+            currentState.route != AdminRoute.ServerDetails(serverId) ||
+            currentState.initialSetup.mode != InitialSetupUiMode.CONFIGURED
+        ) return
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerUsers(serverId),
+                serverUsers = ServerUsersUiState(loading = true),
+                notice = null,
+            )
+        }
+        loadServerUsers(serverId)
+    }
+
+    fun closeServerUsers() {
+        val route = mutableState.value.route as? AdminRoute.ServerUsers ?: return
+        serverUsersJob?.cancel()
+        serverUsersJob = null
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerDetails(route.serverId),
+                serverUsers = ServerUsersUiState(),
+            )
+        }
+    }
+
+    fun retryServerUsers() {
+        val route = mutableState.value.route as? AdminRoute.ServerUsers ?: return
+        if (serverUsersJob?.isActive == true) return
+        mutableState.update {
+            it.copy(serverUsers = ServerUsersUiState(loading = true))
+        }
+        loadServerUsers(route.serverId)
+    }
+
+    fun openAddServerUser() {
+        val route = mutableState.value.route as? AdminRoute.ServerUsers ?: return
+        val users = mutableState.value.serverUsers
+        if (users.loading || users.errorMessage != null) return
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.AddServerUser(route.serverId),
+                addServerUser = AddServerUserState(),
+            )
+        }
+    }
+
+    fun closeAddServerUser() {
+        val route = mutableState.value.route as? AdminRoute.AddServerUser ?: return
+        val add = mutableState.value.addServerUser
+        if (add.submitting || add.token != null) return
+        addServerUserJob?.cancel()
+        addServerUserJob = null
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerUsers(route.serverId),
+                addServerUser = AddServerUserState(),
+            )
+        }
+    }
+
+    fun updateServerUserLogin(value: String) {
+        updateAddServerUser {
+            copy(login = value, loginError = null, errorMessage = null)
+        }
+    }
+
+    fun updateServerUserDisplayName(value: String) {
+        updateAddServerUser {
+            copy(displayName = value, displayNameError = null, errorMessage = null)
+        }
+    }
+
+    fun submitServerUser() {
+        if (addServerUserJob?.isActive == true) return
+        val route = mutableState.value.route as? AdminRoute.AddServerUser ?: return
+        val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
+        val form = mutableState.value.addServerUser
+        if (form.token != null) return
+        val login = form.login.trim()
+        val displayName = form.displayName.trim()
+        val loginError = when {
+            login.isEmpty() -> "Укажите логин"
+            login.length > MAX_SERVER_USER_LOGIN_LENGTH ->
+                "Логин должен быть не длиннее $MAX_SERVER_USER_LOGIN_LENGTH символов"
+            login == "--data-dir" -> "Этот логин зарезервирован"
+            !login.matches(SERVER_USER_LOGIN_PATTERN) ->
+                "Используйте латинские буквы, цифры, точку, дефис или подчёркивание"
+            else -> null
+        }
+        val displayNameError = when {
+            displayName.isEmpty() -> "Укажите имя"
+            displayName.length > MAX_SERVER_USER_DISPLAY_NAME_LENGTH ->
+                "Имя должно быть не длиннее $MAX_SERVER_USER_DISPLAY_NAME_LENGTH символов"
+            displayName == "--data-dir" -> "Выберите другое имя"
+            displayName.any(Char::isISOControl) -> "Имя содержит недопустимые символы"
+            else -> null
+        }
+        if (loginError != null || displayNameError != null) {
+            mutableState.update {
+                it.copy(
+                    addServerUser = form.copy(
+                        login = login,
+                        displayName = displayName,
+                        loginError = loginError,
+                        displayNameError = displayNameError,
+                        errorMessage = null,
+                    ),
+                )
+            }
+            return
+        }
+        mutableState.update {
+            it.copy(
+                addServerUser = form.copy(
+                    login = login,
+                    displayName = displayName,
+                    submitting = true,
+                    loginError = null,
+                    displayNameError = null,
+                    errorMessage = null,
+                ),
+            )
+        }
+        addServerUserJob = viewModelScope.launch {
+            try {
+                val added = withContext(Dispatchers.IO) {
+                    val connection = connectToServer(server)
+                    try {
+                        serverUsersReader.add(
+                            connection = connection,
+                            sshLogin = server.sshLogin,
+                            login = login,
+                            displayName = displayName,
+                        )
+                    } finally {
+                        runCatching { connection.close() }
+                    }
+                }
+                if (mutableState.value.route == route) {
+                    mutableState.update { state ->
+                        state.copy(
+                            serverUsers = state.serverUsers.copy(
+                                users = (state.serverUsers.users + added.user)
+                                    .sortedBy { it.login },
+                            ),
+                            addServerUser = state.addServerUser.copy(
+                                submitting = false,
+                                token = added.token,
+                            ),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == route) {
+                    mutableState.update {
+                        it.copy(
+                            addServerUser = it.addServerUser.copy(
+                                submitting = false,
+                                errorMessage = serverUserAddErrorMessage(error),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                addServerUserJob = null
+            }
+        }
+    }
+
+    fun serverUserTokenCopied() {
+        val route = mutableState.value.route as? AdminRoute.AddServerUser ?: return
+        if (mutableState.value.addServerUser.token == null) return
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerUsers(route.serverId),
+                addServerUser = AddServerUserState(),
+            )
+        }
+    }
+
+    fun openServerUser(login: String) {
+        val route = mutableState.value.route as? AdminRoute.ServerUsers ?: return
+        val user = mutableState.value.serverUsers.users.firstOrNull { it.login == login } ?: return
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerUserDetails(route.serverId, user),
+                serverUserDetails = ServerUserDetailsUiState(),
+            )
+        }
+    }
+
+    fun closeServerUser() {
+        val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
+        val details = mutableState.value.serverUserDetails
+        if (details.busy || details.token != null) return
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerUsers(route.serverId),
+                serverUserDetails = ServerUserDetailsUiState(),
+            )
+        }
+    }
+
+    fun deleteServerUser() {
+        if (
+            deleteServerUserJob?.isActive == true ||
+            rotateServerUserTokenJob?.isActive == true ||
+            changeServerUserAccessJob?.isActive == true ||
+            renameServerUserJob?.isActive == true ||
+            mutableState.value.serverUserDetails.token != null
+        ) return
+        val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
+        val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
+        mutableState.update {
+            it.copy(serverUserDetails = ServerUserDetailsUiState(deleting = true))
+        }
+        deleteServerUserJob = viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val connection = connectToServer(server)
+                    try {
+                        serverUsersReader.delete(
+                            connection = connection,
+                            sshLogin = server.sshLogin,
+                            login = route.user.login,
+                        )
+                    } finally {
+                        runCatching { connection.close() }
+                    }
+                }
+                if (mutableState.value.route == route) {
+                    mutableState.update { state ->
+                        state.copy(
+                            route = AdminRoute.ServerUsers(route.serverId),
+                            serverUsers = state.serverUsers.copy(
+                                users = state.serverUsers.users.filterNot {
+                                    it.login == route.user.login
+                                },
+                            ),
+                            serverUserDetails = ServerUserDetailsUiState(),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == route) {
+                    mutableState.update {
+                        it.copy(
+                            serverUserDetails = ServerUserDetailsUiState(
+                                errorMessage = serverUserDeleteErrorMessage(error),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                deleteServerUserJob = null
+            }
+        }
+    }
+
+    fun rotateServerUserToken() {
+        if (
+            rotateServerUserTokenJob?.isActive == true ||
+            deleteServerUserJob?.isActive == true ||
+            changeServerUserAccessJob?.isActive == true ||
+            renameServerUserJob?.isActive == true ||
+            mutableState.value.serverUserDetails.token != null
+        ) return
+        val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
+        val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
+        mutableState.update {
+            it.copy(serverUserDetails = ServerUserDetailsUiState(rotatingToken = true))
+        }
+        rotateServerUserTokenJob = viewModelScope.launch {
+            try {
+                val token = withContext(Dispatchers.IO) {
+                    val connection = connectToServer(server)
+                    try {
+                        serverUsersReader.rotateToken(
+                            connection = connection,
+                            sshLogin = server.sshLogin,
+                            login = route.user.login,
+                        )
+                    } finally {
+                        runCatching { connection.close() }
+                    }
+                }
+                if (mutableState.value.route == route) {
+                    mutableState.update {
+                        it.copy(
+                            serverUserDetails = ServerUserDetailsUiState(token = token),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == route) {
+                    mutableState.update {
+                        it.copy(
+                            serverUserDetails = ServerUserDetailsUiState(
+                                errorMessage = serverUserTokenErrorMessage(error),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                rotateServerUserTokenJob = null
+            }
+        }
+    }
+
+    fun serverUserRotatedTokenCopied() {
+        if (
+            mutableState.value.route !is AdminRoute.ServerUserDetails ||
+            mutableState.value.serverUserDetails.token == null
+        ) return
+        mutableState.update {
+            it.copy(serverUserDetails = ServerUserDetailsUiState())
+        }
+    }
+
+    fun changeServerUserAccess() {
+        if (
+            changeServerUserAccessJob?.isActive == true ||
+            rotateServerUserTokenJob?.isActive == true ||
+            deleteServerUserJob?.isActive == true ||
+            renameServerUserJob?.isActive == true ||
+            mutableState.value.serverUserDetails.token != null
+        ) return
+        val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
+        val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
+        val user = mutableState.value.serverUsers.users
+            .firstOrNull { it.login == route.user.login } ?: return
+        val disabled = !user.disabled
+        mutableState.update {
+            it.copy(serverUserDetails = ServerUserDetailsUiState(changingAccess = true))
+        }
+        changeServerUserAccessJob = viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val connection = connectToServer(server)
+                    try {
+                        serverUsersReader.setDisabled(
+                            connection = connection,
+                            sshLogin = server.sshLogin,
+                            login = user.login,
+                            disabled = disabled,
+                        )
+                    } finally {
+                        runCatching { connection.close() }
+                    }
+                }
+                if (mutableState.value.route == route) {
+                    mutableState.update { state ->
+                        state.copy(
+                            serverUsers = state.serverUsers.copy(
+                                users = state.serverUsers.users.map {
+                                    if (it.login == user.login) it.copy(disabled = disabled) else it
+                                },
+                            ),
+                            serverUserDetails = ServerUserDetailsUiState(),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == route) {
+                    mutableState.update {
+                        it.copy(
+                            serverUserDetails = ServerUserDetailsUiState(
+                                errorMessage = serverUserAccessErrorMessage(error, disabled),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                changeServerUserAccessJob = null
+            }
+        }
+    }
+
+    fun openServerUserRename() {
+        val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
+        val details = mutableState.value.serverUserDetails
+        if (details.busy || details.token != null) return
+        val user = mutableState.value.serverUsers.users
+            .firstOrNull { it.login == route.user.login } ?: route.user
+        mutableState.update {
+            it.copy(
+                serverUserDetails = details.copy(
+                    renameDialogVisible = true,
+                    renameDraft = user.displayName,
+                    renameErrorMessage = null,
+                    errorMessage = null,
+                ),
+            )
+        }
+    }
+
+    fun closeServerUserRename() {
+        val details = mutableState.value.serverUserDetails
+        if (!details.renameDialogVisible || details.renaming) return
+        mutableState.update {
+            it.copy(
+                serverUserDetails = details.copy(
+                    renameDialogVisible = false,
+                    renameDraft = "",
+                    renameErrorMessage = null,
+                ),
+            )
+        }
+    }
+
+    fun updateServerUserRenameDraft(value: String) {
+        val details = mutableState.value.serverUserDetails
+        if (!details.renameDialogVisible || details.renaming) return
+        mutableState.update {
+            it.copy(
+                serverUserDetails = details.copy(
+                    renameDraft = value,
+                    renameErrorMessage = null,
+                ),
+            )
+        }
+    }
+
+    fun renameServerUser() {
+        if (
+            renameServerUserJob?.isActive == true ||
+            rotateServerUserTokenJob?.isActive == true ||
+            changeServerUserAccessJob?.isActive == true ||
+            deleteServerUserJob?.isActive == true
+        ) return
+        val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
+        val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
+        val user = mutableState.value.serverUsers.users
+            .firstOrNull { it.login == route.user.login } ?: route.user
+        val details = mutableState.value.serverUserDetails
+        if (!details.renameDialogVisible || details.token != null) return
+        val displayName = details.renameDraft.trim()
+        val validationError = when {
+            displayName.isEmpty() -> "Укажите имя"
+            displayName.length > MAX_SERVER_USER_DISPLAY_NAME_LENGTH ->
+                "Имя должно быть не длиннее $MAX_SERVER_USER_DISPLAY_NAME_LENGTH символов"
+            displayName == "--data-dir" -> "Выберите другое имя"
+            displayName.any(Char::isISOControl) -> "Имя содержит недопустимые символы"
+            else -> null
+        }
+        if (validationError != null) {
+            mutableState.update {
+                it.copy(
+                    serverUserDetails = details.copy(
+                        renameDraft = displayName,
+                        renameErrorMessage = validationError,
+                    ),
+                )
+            }
+            return
+        }
+        if (displayName == user.displayName) {
+            mutableState.update { it.copy(serverUserDetails = ServerUserDetailsUiState()) }
+            return
+        }
+        mutableState.update {
+            it.copy(
+                serverUserDetails = details.copy(
+                    renaming = true,
+                    renameDraft = displayName,
+                    renameErrorMessage = null,
+                    errorMessage = null,
+                ),
+            )
+        }
+        renameServerUserJob = viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val connection = connectToServer(server)
+                    try {
+                        serverUsersReader.rename(
+                            connection = connection,
+                            sshLogin = server.sshLogin,
+                            login = user.login,
+                            displayName = displayName,
+                        )
+                    } finally {
+                        runCatching { connection.close() }
+                    }
+                }
+                if (mutableState.value.route == route) {
+                    mutableState.update { state ->
+                        state.copy(
+                            serverUsers = state.serverUsers.copy(
+                                users = state.serverUsers.users.map {
+                                    if (it.login == user.login) {
+                                        it.copy(displayName = displayName)
+                                    } else {
+                                        it
+                                    }
+                                },
+                            ),
+                            serverUserDetails = ServerUserDetailsUiState(),
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == route) {
+                    mutableState.update {
+                        it.copy(
+                            serverUserDetails = it.serverUserDetails.copy(
+                                renaming = false,
+                                renameErrorMessage = serverUserRenameErrorMessage(error),
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                renameServerUserJob = null
+            }
+        }
+    }
+
+    private fun updateAddServerUser(transform: AddServerUserState.() -> AddServerUserState) {
+        val add = mutableState.value.addServerUser
+        if (mutableState.value.route !is AdminRoute.AddServerUser || add.submitting || add.token != null) {
+            return
+        }
+        mutableState.update { it.copy(addServerUser = add.transform()) }
+    }
+
+    private fun serverUserAddErrorMessage(error: Exception): String = when (error) {
+        is ServerUserAlreadyExistsException -> "Этот логин уже занят"
+        is ServerUserAdministrativeAccessException ->
+            "Нет прав для добавления пользователя на сервере"
+        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
+        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> "Не удалось добавить пользователя"
+    }
+
+    private fun serverUserDeleteErrorMessage(error: Exception): String = when (error) {
+        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+        is ServerUserAdministrativeAccessException ->
+            "Нет прав для удаления пользователя на сервере"
+        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
+        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> "Не удалось удалить пользователя"
+    }
+
+    private fun serverUserTokenErrorMessage(error: Exception): String = when (error) {
+        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+        is ServerUserAdministrativeAccessException ->
+            "Нет прав для смены токена на сервере"
+        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
+        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> "Не удалось сменить токен"
+    }
+
+    private fun serverUserAccessErrorMessage(error: Exception, disabling: Boolean): String = when (error) {
+        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+        is ServerUserAdministrativeAccessException ->
+            "Нет прав для изменения статуса пользователя"
+        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
+        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> if (disabling) {
+            "Не удалось заблокировать пользователя"
+        } else {
+            "Не удалось разблокировать пользователя"
+        }
+    }
+
+    private fun serverUserRenameErrorMessage(error: Exception): String = when (error) {
+        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+        is ServerUserAdministrativeAccessException ->
+            "Нет прав для переименования пользователя"
+        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
+        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> "Не удалось переименовать пользователя"
+    }
+
+    private fun loadServerUsers(serverId: String) {
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        serverUsersJob = viewModelScope.launch {
+            try {
+                val users = withContext(Dispatchers.IO) {
+                    val connection = connectToServer(server)
+                    try {
+                        serverUsersReader.read(connection, server.sshLogin)
+                    } finally {
+                        runCatching { connection.close() }
+                    }
+                }
+                if (mutableState.value.route == AdminRoute.ServerUsers(serverId)) {
+                    mutableState.update {
+                        it.copy(serverUsers = ServerUsersUiState(users = users))
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                if (mutableState.value.route == AdminRoute.ServerUsers(serverId)) {
+                    mutableState.update {
+                        it.copy(
+                            serverUsers = ServerUsersUiState(
+                                errorMessage = "Не удалось загрузить пользователей",
+                            ),
+                        )
+                    }
+                }
+            } finally {
+                serverUsersJob = null
+            }
         }
     }
 
@@ -1246,6 +1950,9 @@ class AdminViewModel(
     )
 
     companion object {
+        private val SERVER_USER_LOGIN_PATTERN = Regex("[A-Za-z0-9._-]+")
+        private const val MAX_SERVER_USER_LOGIN_LENGTH = 64
+        private const val MAX_SERVER_USER_DISPLAY_NAME_LENGTH = 100
         private const val SSH_CHECK_COMMAND =
             "LC_ALL=C; export LC_ALL; id -un && hostname && uptime -p"
         private const val REMOTE_OPERATION_POLL_MILLIS = 1_000L
@@ -1273,6 +1980,7 @@ class AdminViewModel(
                         ),
                         tinitalkStatusChecker = TiniTalkStatusChecker(applicationContext),
                         initialSetupInspector = InitialSetupInspector(applicationContext),
+                        serverUsersReader = ServerUsersReader(),
                         remoteOperationRunner = RemoteServerOperationRunner(applicationContext),
                     ) as T
                 }

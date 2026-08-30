@@ -4,6 +4,21 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+val repositoryDir = rootDir
+val commitHash = runCatching {
+    val process = ProcessBuilder(
+        "git",
+        "-c",
+        "safe.directory=${repositoryDir.absolutePath.replace('\\', '/')}",
+        "rev-parse",
+        "--short=8",
+        "HEAD",
+    ).directory(repositoryDir).redirectErrorStream(true).start()
+    val output = process.inputStream.bufferedReader().use { it.readText().trim() }
+    check(process.waitFor() == 0 && output.matches(Regex("[0-9a-fA-F]+")))
+    output
+}.getOrDefault("unknown")
+
 android {
     namespace = "org.tinitalk.admin"
     compileSdk = 36
@@ -13,10 +28,12 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1"
+        buildConfigField("String", "COMMIT_HASH", "\"$commitHash\"")
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 

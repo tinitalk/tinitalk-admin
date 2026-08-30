@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import org.tinitalk.admin.BuildConfig
 import org.tinitalk.admin.R
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.model.displayTitle
@@ -119,12 +120,21 @@ private fun AppHeader(
                 )
             }
         }
-        Text(
-            text = "TiniTalk Admin",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+        Column(
+            verticalArrangement = Arrangement.Center,
             modifier = Modifier.weight(1f),
-        )
+        ) {
+            Text(
+                text = "TiniTalk Admin",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.COMMIT_HASH})",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         if (showMenu) {
             Box {
                 IconButton(onClick = { menuExpanded = true }) {

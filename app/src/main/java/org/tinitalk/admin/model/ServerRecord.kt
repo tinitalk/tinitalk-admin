@@ -16,6 +16,7 @@ data class ServerRecord(
     @SerializedName("ssh_port") val sshPort: Int,
     @SerializedName("ssh_login") val sshLogin: String,
     @SerializedName("host_key") val hostKey: PinnedHostKey,
+    @SerializedName("keystore_alias") val keystoreAlias: String,
     @SerializedName("verified_at_epoch_millis") val verifiedAtEpochMillis: Long,
 )
 

@@ -20,7 +20,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -29,6 +32,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -55,30 +62,6 @@ fun ServerListScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onAddServer,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    Text("Добавить сервер")
-                }
-            }
-        },
         modifier = modifier,
     ) { innerPadding ->
         Column(
@@ -86,9 +69,15 @@ fun ServerListScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            AppHeader()
+            AppHeader(
+                showMenu = servers.isNotEmpty(),
+                onAddServer = onAddServer,
+            )
             if (servers.isEmpty()) {
-                EmptyServerList(Modifier.weight(1f).fillMaxWidth())
+                EmptyServerList(
+                    onAddServer = onAddServer,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -105,7 +94,12 @@ fun ServerListScreen(
 }
 
 @Composable
-private fun AppHeader() {
+private fun AppHeader(
+    showMenu: Boolean,
+    onAddServer: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -129,12 +123,35 @@ private fun AppHeader() {
             text = "TiniTalk Admin",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
         )
+        if (showMenu) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    MoreVertIcon()
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Добавить сервер") },
+                        onClick = {
+                            menuExpanded = false
+                            onAddServer()
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun EmptyServerList(modifier: Modifier = Modifier) {
+private fun EmptyServerList(
+    onAddServer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -151,6 +168,22 @@ private fun EmptyServerList(modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+        Spacer(Modifier.height(20.dp))
+        OutlinedButton(
+            onClick = onAddServer,
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+            ),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.primary,
+            ),
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+            modifier = Modifier.height(48.dp),
+        ) {
+            Text("Добавить сервер")
+        }
     }
 }
 

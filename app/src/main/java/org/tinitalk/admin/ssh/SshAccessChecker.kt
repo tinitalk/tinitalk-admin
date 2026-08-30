@@ -4,13 +4,20 @@ import org.tinitalk.admin.model.PinnedHostKey
 import org.tinitalk.admin.server.EndpointParser
 import org.tinitalk.admin.server.PinnedPeerVerifier
 import org.tinitalk.admin.server.ResolvedEndpoint
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.Closeable
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.SocketTimeoutException
+import java.security.PublicKey
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeout
 import net.schmizz.sshj.DefaultConfig
@@ -18,6 +25,7 @@ import net.schmizz.sshj.DefaultSecurityProviderConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.transport.verification.HostKeyVerifier
 import net.schmizz.sshj.userauth.UserAuthException
+import net.schmizz.sshj.xfer.InMemorySourceFile
 
 sealed interface SshCredential : Closeable {
     class Password(internal val chars: CharArray) : SshCredential {
@@ -31,40 +39,59 @@ sealed interface SshCredential : Closeable {
             identity.close()
         }
     }
+
+    data class ManagedKey(internal val alias: String) : SshCredential {
+        override fun close() = Unit
+    }
+}
+
+data class SshCommandResult(
+    val exitCode: Int,
+    val stdout: String,
+    val stderr: String,
+)
+
+interface SshConnection : Closeable {
+    suspend fun exec(command: String): SshCommandResult
+    suspend fun upload(bytes: ByteArray, remotePath: String, mode: Int)
 }
 
 interface SshAccessChecker {
     suspend fun scanHostKey(endpoint: ResolvedEndpoint): PinnedHostKey
 
-    suspend fun verifyAccess(
+    suspend fun connect(
         endpoint: ResolvedEndpoint,
         login: String,
         credential: SshCredential,
         pinnedHostKey: PinnedHostKey,
-    )
+    ): SshConnection
 }
 
 class SshjAccessChecker(
+    private val identityStore: ManagedSshIdentityStore,
     private val operationTimeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+    private val maxOutputBytes: Int = DEFAULT_MAX_OUTPUT_BYTES,
 ) : SshAccessChecker {
     override suspend fun scanHostKey(endpoint: ResolvedEndpoint): PinnedHostKey {
         val capture = CapturingHostKeyVerifier()
-        return runSshOperation(hostKeyRejected = { false }) { client ->
+        return useClient(hostKeyRejected = { false }) { client ->
             client.addHostKeyVerifier(capture)
             connectToPinnedAddress(client, endpoint)
-            capture.observed ?: throw IllegalStateException("SSH server did not present a host key")
+            capture.observed ?: error("SSH server did not present a host key")
         }
     }
 
-    override suspend fun verifyAccess(
+    override suspend fun connect(
         endpoint: ResolvedEndpoint,
         login: String,
         credential: SshCredential,
         pinnedHostKey: PinnedHostKey,
-    ) {
+    ): SshConnection {
         val verifier = PinnedHostKeyVerifier(pinnedHostKey)
+        val client = newClient()
+        var connected = false
         try {
-            runSshOperation(hostKeyRejected = { verifier.rejected }) { client ->
+            bounded {
                 client.addHostKeyVerifier(verifier)
                 connectToPinnedAddress(client, endpoint)
                 try {
@@ -74,42 +101,57 @@ class SshjAccessChecker(
                             login,
                             client.loadKeys(credential.identity.keyPair()),
                         )
+                        is SshCredential.ManagedKey -> client.authPublickey(
+                            login,
+                            client.loadKeys(identityStore.load(credential.alias).keyPair),
+                        )
                     }
                 } catch (_: UserAuthException) {
                     throw SshFailure.AuthenticationFailed()
                 }
             }
+            connected = true
+            return SshjConnection(client, operationTimeoutMillis, maxOutputBytes)
+        } catch (error: Throwable) {
+            if (error is CancellationException && error !is TimeoutCancellationException) throw error
+            throw mapFailure(error, verifier.rejected)
         } finally {
-            credential.close()
+            if (!connected) client.closeIgnoringFailure()
         }
     }
 
-    private suspend fun <T> runSshOperation(
+    private suspend fun <T> useClient(
         hostKeyRejected: () -> Boolean,
         block: (SSHClient) -> T,
     ): T {
-        val client = SSHClient(secureSshConfig()).apply {
-            connectTimeout = operationTimeoutMillis.toInt()
-            timeout = operationTimeoutMillis.toInt()
-        }
+        val client = newClient()
         return try {
-            withTimeout(operationTimeoutMillis) {
-                runInterruptible(Dispatchers.IO) { block(client) }
-            }
+            bounded { block(client) }
         } catch (error: Throwable) {
             if (error is CancellationException && error !is TimeoutCancellationException) throw error
-            throw when {
-                error is SshFailure -> error
-                hostKeyRejected() -> SshFailure.HostKeyChanged()
-                error is TimeoutCancellationException ||
-                    error is InterruptedException ||
-                    error is SocketTimeoutException ||
-                    error is TimeoutException -> SshFailure.Timeout()
-                else -> SshFailure.Transport(error)
-            }
+            throw mapFailure(error, hostKeyRejected())
         } finally {
             client.closeIgnoringFailure()
         }
+    }
+
+    private fun newClient() = SSHClient(secureSshConfig()).apply {
+        connectTimeout = operationTimeoutMillis.toInt()
+        timeout = operationTimeoutMillis.toInt()
+    }
+
+    private suspend fun <T> bounded(block: () -> T): T = withTimeout(operationTimeoutMillis) {
+        runInterruptible(Dispatchers.IO) { block() }
+    }
+
+    private fun mapFailure(error: Throwable, hostKeyRejected: Boolean): SshFailure = when {
+        error is SshFailure -> error
+        hostKeyRejected -> SshFailure.HostKeyChanged()
+        error is TimeoutCancellationException ||
+            error is InterruptedException ||
+            error is SocketTimeoutException ||
+            error is TimeoutException -> SshFailure.Timeout()
+        else -> SshFailure.Transport(error)
     }
 
     private fun connectToPinnedAddress(client: SSHClient, endpoint: ResolvedEndpoint) {
@@ -124,7 +166,7 @@ class SshjAccessChecker(
         var observed: PinnedHostKey? = null
             private set
 
-        override fun verify(hostname: String, port: Int, key: java.security.PublicKey): Boolean {
+        override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
             observed = SshHostKeys.fromPublicKey(key)
             return true
         }
@@ -134,7 +176,101 @@ class SshjAccessChecker(
 
     private companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 10_000L
+        const val DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
     }
+}
+
+private class SshjConnection(
+    private val client: SSHClient,
+    private val timeoutMillis: Long,
+    private val maxOutputBytes: Int,
+) : SshConnection {
+    override suspend fun exec(command: String): SshCommandResult = try {
+        withTimeout(timeoutMillis) {
+            val session = runInterruptible(Dispatchers.IO) { client.startSession() }
+            val running = try {
+                runInterruptible(Dispatchers.IO) { session.exec(command) }
+            } catch (error: Throwable) {
+                session.closeIgnoringFailure()
+                throw error
+            }
+            try {
+                coroutineScope {
+                    val stdout = async(Dispatchers.IO) {
+                        runInterruptible { running.inputStream.readBounded(maxOutputBytes) }
+                    }
+                    val stderr = async(Dispatchers.IO) {
+                        runInterruptible { running.errorStream.readBounded(maxOutputBytes) }
+                    }
+                    val exitCode = runInterruptible(Dispatchers.IO) {
+                        running.join(timeoutMillis, TimeUnit.MILLISECONDS)
+                        running.exitStatus
+                    } ?: throw SshFailure.Timeout()
+                    SshCommandResult(exitCode, stdout.await(), stderr.await())
+                }
+            } finally {
+                running.closeIgnoringFailure()
+                session.closeIgnoringFailure()
+            }
+        }
+    } catch (error: Throwable) {
+        if (error is CancellationException && error !is TimeoutCancellationException) throw error
+        throw error.asConnectionFailure()
+    }
+
+    override suspend fun upload(bytes: ByteArray, remotePath: String, mode: Int) {
+        try {
+            withTimeout(timeoutMillis) {
+                runInterruptible(Dispatchers.IO) {
+                    client.newSFTPClient().use { sftp ->
+                        sftp.put(ByteArraySourceFile(bytes, remotePath.substringAfterLast('/')), remotePath)
+                        sftp.chmod(remotePath, mode)
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException && error !is TimeoutCancellationException) throw error
+            throw error.asConnectionFailure()
+        }
+    }
+
+    override fun close() {
+        client.close()
+    }
+
+    private fun Throwable.asConnectionFailure(): SshFailure = when (this) {
+        is SshFailure -> this
+        is TimeoutCancellationException,
+        is InterruptedException,
+        is SocketTimeoutException,
+        is TimeoutException,
+        -> SshFailure.Timeout()
+        else -> SshFailure.Transport(this)
+    }
+}
+
+private class ByteArraySourceFile(
+    private val bytes: ByteArray,
+    private val filename: String,
+) : InMemorySourceFile() {
+    override fun getName(): String = filename
+    override fun getLength(): Long = bytes.size.toLong()
+    override fun getInputStream(): InputStream = ByteArrayInputStream(bytes)
+    override fun getPermissions(): Int = 384
+}
+
+private fun InputStream.readBounded(maxBytes: Int): String {
+    val output = ByteArrayOutputStream(minOf(maxBytes, 8_192))
+    val chunk = ByteArray(8_192)
+    var total = 0
+    while (true) {
+        val read = read(chunk)
+        if (read < 0) break
+        total += read
+        if (total > maxBytes) throw SshFailure.OutputTooLarge()
+        output.write(chunk, 0, read)
+    }
+    return output.toString(Charsets.UTF_8.name())
 }
 
 private fun secureSshConfig(): DefaultConfig = DefaultSecurityProviderConfig().apply {
@@ -185,6 +321,6 @@ private fun Closeable.closeIgnoringFailure() {
     try {
         close()
     } catch (_: Exception) {
-        // Keep the original SSH result.
+        // Preserve the primary SSH result.
     }
 }

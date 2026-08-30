@@ -109,6 +109,7 @@ class SharedPreferencesServerStore(
         @SerializedName("ssh_port") val sshPort: Int?,
         @SerializedName("ssh_login") val sshLogin: String?,
         @SerializedName("host_key") val hostKey: StoredHostKey?,
+        @SerializedName("keystore_alias") val keystoreAlias: String?,
         @SerializedName("verified_at_epoch_millis") val verifiedAtEpochMillis: Long?,
     ) {
         fun toModel(): ServerRecord {
@@ -120,6 +121,7 @@ class SharedPreferencesServerStore(
                 sshPort = requireNotNull(sshPort) { "Missing saved field: ssh_port" },
                 sshLogin = sshLogin.required("ssh_login"),
                 hostKey = requireNotNull(hostKey) { "Missing saved field: host_key" }.toModel(),
+                keystoreAlias = keystoreAlias.required("keystore_alias"),
                 verifiedAtEpochMillis = requireNotNull(verifiedAtEpochMillis) {
                     "Missing saved field: verified_at_epoch_millis"
                 },

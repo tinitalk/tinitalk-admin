@@ -10,11 +10,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,13 +50,18 @@ import org.tinitalk.admin.model.ServerRecord
 fun ServerDetailsScreen(
     server: ServerRecord,
     snackbarHostState: SnackbarHostState,
+    sshCheckInProgress: Boolean,
+    sshCheckResult: SshCheckResult?,
     onBack: () -> Unit,
     onRename: (String) -> Unit,
     onRemove: () -> Unit,
+    onCheckSsh: () -> Unit,
+    onDismissSshCheckResult: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var renameDialogVisible by rememberSaveable(server.id) { mutableStateOf(false) }
     var deleteDialogVisible by rememberSaveable(server.id) { mutableStateOf(false) }
+    var menuExpanded by rememberSaveable(server.id) { mutableStateOf(false) }
     var nameDraft by rememberSaveable(server.id) { mutableStateOf(server.displayName) }
     val renameFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -65,29 +76,6 @@ fun ServerDetailsScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                OutlinedButton(
-                    onClick = { deleteDialogVisible = true },
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.error.copy(alpha = 0.55f),
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    Text("Удалить из приложения")
-                }
-            }
-        },
         modifier = modifier,
     ) { innerPadding ->
         Column(
@@ -98,7 +86,34 @@ fun ServerDetailsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
-            ScreenHeader(title = "Сервер", onBack = onBack)
+            ScreenHeader(
+                title = "Сервер",
+                onBack = onBack,
+                actions = {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            MoreVertIcon()
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Удалить из приложения",
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    deleteDialogVisible = true
+                                },
+                            )
+                        }
+                    }
+                },
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -136,8 +151,38 @@ fun ServerDetailsScreen(
                     modifier = Modifier.padding(18.dp),
                 ) {
                     ServerProperty("Адрес", server.enteredAddress)
-                    ServerProperty("SSH-порт", server.sshPort.toString())
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        ServerProperty(
+                            label = "SSH-порт",
+                            value = server.sshPort.toString(),
+                            modifier = Modifier.weight(1f),
+                        )
+                        ServerProperty(
+                            label = "Пользователь",
+                            value = server.sshLogin,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
+            }
+            OutlinedButton(
+                onClick = onCheckSsh,
+                enabled = !sshCheckInProgress,
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                if (sshCheckInProgress) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Box(Modifier.width(10.dp))
+                }
+                Text(if (sshCheckInProgress) "Проверяем SSH-доступ…" else "Проверить SSH")
             }
         }
     }
@@ -200,11 +245,38 @@ fun ServerDetailsScreen(
             },
         )
     }
+
+    sshCheckResult?.let { result ->
+        AlertDialog(
+            onDismissRequest = onDismissSshCheckResult,
+            title = { Text("SSH-доступ работает") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    ServerProperty("Пользователь", result.user, highlightValue = true)
+                    ServerProperty("Сервер", result.host, highlightValue = true)
+                    ServerProperty("Время работы", result.uptime, highlightValue = true)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onDismissSshCheckResult) {
+                    Text("Закрыть")
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun ServerProperty(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun ServerProperty(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    highlightValue: Boolean = false,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = modifier,
+    ) {
         Text(
             text = label,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -212,8 +284,9 @@ private fun ServerProperty(label: String, value: String) {
         )
         Text(
             text = value,
+            color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
+            fontWeight = if (highlightValue) FontWeight.SemiBold else FontWeight.Medium,
         )
     }
 }

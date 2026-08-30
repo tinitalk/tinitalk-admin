@@ -12,11 +12,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalAutofillManager
 
 @Composable
 fun AdminApp(viewModel: AdminViewModel) {
     val state by viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val autofillManager = LocalAutofillManager.current
+    val closeAddServer = {
+        autofillManager?.cancel()
+        viewModel.closeAddServer()
+    }
+    val confirmFingerprint = {
+        autofillManager?.cancel()
+        viewModel.confirmFingerprint()
+    }
     val privateKeyPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = viewModel::privateKeySelected,
@@ -31,7 +41,7 @@ fun AdminApp(viewModel: AdminViewModel) {
 
     BackHandler(enabled = state.route != AdminRoute.ServerList) {
         when (state.route) {
-            AdminRoute.AddServer -> viewModel.closeAddServer()
+            AdminRoute.AddServer -> closeAddServer()
             is AdminRoute.ServerDetails -> viewModel.closeServer()
             AdminRoute.ServerList -> Unit
         }
@@ -48,14 +58,14 @@ fun AdminApp(viewModel: AdminViewModel) {
 
         AdminRoute.AddServer -> AddServerScreen(
             state = state.addServer,
-            onBack = viewModel::closeAddServer,
+            onBack = closeAddServer,
             onDisplayNameChange = viewModel::updateDisplayName,
             onAddressChange = viewModel::updateAddress,
             onPortChange = viewModel::updateSshPort,
             onLoginChange = viewModel::updateSshLogin,
             onScanFingerprint = viewModel::scanFingerprint,
             onRejectFingerprint = viewModel::rejectFingerprint,
-            onConfirmFingerprint = viewModel::confirmFingerprint,
+            onConfirmFingerprint = confirmFingerprint,
             onAuthenticationChange = viewModel::updateAuthentication,
             onPasswordChange = viewModel::updatePassword,
             onPassphraseChange = viewModel::updatePrivateKeyPassphrase,
@@ -71,9 +81,13 @@ fun AdminApp(viewModel: AdminViewModel) {
                 ServerDetailsScreen(
                     server = server,
                     snackbarHostState = snackbarHostState,
+                    sshCheckInProgress = state.sshCheckInProgress,
+                    sshCheckResult = state.sshCheckResult,
                     onBack = viewModel::closeServer,
                     onRename = { viewModel.renameServer(server.id, it) },
                     onRemove = { viewModel.removeServer(server.id) },
+                    onCheckSsh = { viewModel.checkServerSsh(server.id) },
+                    onDismissSshCheckResult = viewModel::dismissSshCheckResult,
                     modifier = Modifier.fillMaxSize().systemBarsPadding(),
                 )
             }

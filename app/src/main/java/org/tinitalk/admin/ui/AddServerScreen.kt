@@ -92,7 +92,7 @@ fun AddServerScreen(
 
             AddServerPhase.ScanningFingerprint -> ProgressRow("Получаем SSH fingerprint…")
             is AddServerPhase.ConfirmFingerprint -> Unit
-            AddServerPhase.CheckingAccess -> ProgressRow("Проверяем SSH-доступ…")
+            AddServerPhase.CheckingAccess -> ProgressRow("Настраиваем безопасный SSH-доступ…")
         }
         Spacer(Modifier.height(12.dp))
     }

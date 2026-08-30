@@ -3,6 +3,9 @@ package org.tinitalk.admin.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,10 +30,12 @@ fun ScreenHeader(
     title: String,
     onBack: () -> Unit,
     backEnabled: Boolean = true,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         IconButton(onClick = onBack, enabled = backEnabled) {
             BackArrowIcon()
@@ -40,6 +45,23 @@ fun ScreenHeader(
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
+        Spacer(Modifier.weight(1f))
+        actions()
+    }
+}
+
+@Composable
+fun MoreVertIcon() {
+    val color = MaterialTheme.colorScheme.onSurface
+    Canvas(
+        modifier = Modifier
+            .size(24.dp)
+            .semantics { contentDescription = "Ещё" },
+    ) {
+        val radius = 1.8.dp.toPx()
+        drawCircle(color, radius, center.copy(y = size.height * 0.25f))
+        drawCircle(color, radius, center)
+        drawCircle(color, radius, center.copy(y = size.height * 0.75f))
     }
 }
 

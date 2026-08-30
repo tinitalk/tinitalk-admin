@@ -10,12 +10,18 @@ import org.tinitalk.admin.data.SharedPreferencesServerStore
 import org.tinitalk.admin.model.PinnedHostKey
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.server.DnsValidationException
+import org.tinitalk.admin.server.AddressKind
 import org.tinitalk.admin.server.EndpointParser
 import org.tinitalk.admin.server.EndpointResolver
 import org.tinitalk.admin.server.EndpointValidationException
 import org.tinitalk.admin.server.ResolvedEndpoint
 import org.tinitalk.admin.ssh.ImportedKeyReader
 import org.tinitalk.admin.ssh.ImportedSshIdentityException
+import org.tinitalk.admin.ssh.AndroidKeystoreSshIdentityStore
+import org.tinitalk.admin.ssh.AuthorizedKeyInstaller
+import org.tinitalk.admin.ssh.ManagedAccessBootstrapper
+import org.tinitalk.admin.ssh.ManagedSshIdentityStore
+import org.tinitalk.admin.ssh.MissingAdministrativeAccessException
 import org.tinitalk.admin.ssh.SshAccessChecker
 import org.tinitalk.admin.ssh.SshCredential
 import org.tinitalk.admin.ssh.SshFailure
@@ -67,7 +73,15 @@ data class AdminUiState(
     val route: AdminRoute = AdminRoute.ServerList,
     val servers: List<ServerRecord> = emptyList(),
     val addServer: AddServerState = AddServerState(),
+    val sshCheckInProgress: Boolean = false,
+    val sshCheckResult: SshCheckResult? = null,
     val notice: String? = null,
+)
+
+data class SshCheckResult(
+    val user: String,
+    val host: String,
+    val uptime: String,
 )
 
 class AdminViewModel(
@@ -75,6 +89,8 @@ class AdminViewModel(
     private val endpointResolver: EndpointResolver,
     private val sshAccessChecker: SshAccessChecker,
     private val importedKeyReader: ImportedKeyReader,
+    private val identityStore: ManagedSshIdentityStore,
+    private val managedAccessBootstrapper: ManagedAccessBootstrapper,
 ) : ViewModel() {
     private val initialServers = runCatching(serverStore::list)
     private val mutableState = MutableStateFlow(
@@ -89,6 +105,7 @@ class AdminViewModel(
 
     private var operationId = 0L
     private var currentJob: Job? = null
+    private var sshCheckJob: Job? = null
     private var pendingEndpoint: ResolvedEndpoint? = null
     private var pendingHostKey: PinnedHostKey? = null
     private var selectedPrivateKeyUri: Uri? = null
@@ -122,11 +139,63 @@ class AdminViewModel(
 
     fun openServer(serverId: String) {
         if (mutableState.value.servers.none { it.id == serverId }) return
-        mutableState.update { it.copy(route = AdminRoute.ServerDetails(serverId), notice = null) }
+        sshCheckJob?.cancel()
+        sshCheckJob = null
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerDetails(serverId),
+                sshCheckInProgress = false,
+                sshCheckResult = null,
+                notice = null,
+            )
+        }
     }
 
     fun closeServer() {
-        mutableState.update { it.copy(route = AdminRoute.ServerList) }
+        sshCheckJob?.cancel()
+        sshCheckJob = null
+        mutableState.update {
+            it.copy(
+                route = AdminRoute.ServerList,
+                sshCheckInProgress = false,
+                sshCheckResult = null,
+            )
+        }
+    }
+
+    fun checkServerSsh(serverId: String) {
+        if (sshCheckJob?.isActive == true) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        mutableState.update {
+            it.copy(sshCheckInProgress = true, sshCheckResult = null, notice = null)
+        }
+        sshCheckJob = viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { runSshCheck(server) }
+                if (mutableState.value.route == AdminRoute.ServerDetails(serverId)) {
+                    mutableState.update {
+                        it.copy(sshCheckInProgress = false, sshCheckResult = result)
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == AdminRoute.ServerDetails(serverId)) {
+                    mutableState.update {
+                        it.copy(
+                            sshCheckInProgress = false,
+                            notice = sshCheckErrorMessage(error),
+                        )
+                    }
+                }
+            } finally {
+                sshCheckJob = null
+            }
+        }
+    }
+
+    fun dismissSshCheckResult() {
+        mutableState.update { it.copy(sshCheckResult = null) }
     }
 
     fun renameServer(serverId: String, value: String) {
@@ -140,10 +209,11 @@ class AdminViewModel(
     }
 
     fun removeServer(serverId: String) {
-        if (mutableState.value.servers.none { it.id == serverId }) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
         viewModelScope.launch {
             val records = try {
                 withContext(Dispatchers.IO) {
+                    identityStore.delete(server.keystoreAlias)
                     serverStore.remove(serverId)
                     serverStore.list()
                 }
@@ -165,6 +235,41 @@ class AdminViewModel(
 
     fun clearNotice() {
         mutableState.update { it.copy(notice = null) }
+    }
+
+    private suspend fun runSshCheck(server: ServerRecord): SshCheckResult {
+        val endpoint = ResolvedEndpoint(
+            enteredAddress = server.enteredAddress,
+            sshPort = server.sshPort,
+            frozenIpv4 = server.frozenIpv4,
+            addressKind = if (server.enteredAddress == server.frozenIpv4) {
+                AddressKind.IPV4
+            } else {
+                AddressKind.DNS
+            },
+        )
+        val connection = sshAccessChecker.connect(
+            endpoint = endpoint,
+            login = server.sshLogin,
+            credential = SshCredential.ManagedKey(server.keystoreAlias),
+            pinnedHostKey = server.hostKey,
+        )
+        val command = try {
+            connection.exec(SSH_CHECK_COMMAND)
+        } finally {
+            runCatching { connection.close() }
+        }
+        check(command.exitCode == 0) { "SSH check command failed" }
+        val lines = command.stdout.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+        check(lines.size == 3) { "Unexpected SSH check output" }
+        return SshCheckResult(user = lines[0], host = lines[1], uptime = lines[2])
+    }
+
+    private fun sshCheckErrorMessage(error: Exception): String = when (error) {
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> "Не удалось проверить SSH-доступ"
     }
 
     fun updateDisplayName(value: String) = updateAddServerForm { copy(displayName = value) }
@@ -336,13 +441,7 @@ class AdminViewModel(
             var credential: SshCredential? = null
             try {
                 credential = SshCredential.ImportedKey(importedKeyReader.read(uri, passphrase))
-                sshAccessChecker.verifyAccess(
-                    endpoint = endpoint,
-                    login = metadata.sshLogin,
-                    credential = credential,
-                    pinnedHostKey = hostKey,
-                )
-                if (isCurrent(id)) persistSuccessfulCheck(endpoint, hostKey, metadata)
+                bootstrapAccess(id, endpoint, hostKey, metadata, credential)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -373,13 +472,7 @@ class AdminViewModel(
         }
         currentJob = viewModelScope.launch {
             try {
-                sshAccessChecker.verifyAccess(
-                    endpoint = endpoint,
-                    login = metadata.sshLogin,
-                    credential = credential,
-                    pinnedHostKey = hostKey,
-                )
-                if (isCurrent(id)) persistSuccessfulCheck(endpoint, hostKey, metadata)
+                bootstrapAccess(id, endpoint, hostKey, metadata, credential)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -391,19 +484,51 @@ class AdminViewModel(
         }
     }
 
-    private suspend fun persistSuccessfulCheck(
+    private suspend fun bootstrapAccess(
+        operation: Long,
         endpoint: ResolvedEndpoint,
         hostKey: PinnedHostKey,
         metadata: PendingServerMetadata,
+        credential: SshCredential,
+    ) {
+        if (!isCurrent(operation)) return
+        if (mutableState.value.servers.any {
+                it.enteredAddress == endpoint.enteredAddress &&
+                    it.sshPort == endpoint.sshPort &&
+                    it.sshLogin == metadata.sshLogin
+            }
+        ) {
+            throw ServerAlreadyAddedException()
+        }
+        val serverId = UUID.randomUUID().toString()
+        managedAccessBootstrapper.bootstrap(
+            serverId = serverId,
+            endpoint = endpoint,
+            login = metadata.sshLogin,
+            initialCredential = credential,
+            hostKey = hostKey,
+        ) { keystoreAlias ->
+            if (!isCurrent(operation)) throw CancellationException("Operation was cancelled")
+            persistSuccessfulCheck(serverId, endpoint, hostKey, keystoreAlias, metadata)
+        }
+    }
+
+    private suspend fun persistSuccessfulCheck(
+        serverId: String,
+        endpoint: ResolvedEndpoint,
+        hostKey: PinnedHostKey,
+        keystoreAlias: String,
+        metadata: PendingServerMetadata,
     ) {
         val record = ServerRecord(
-            id = UUID.randomUUID().toString(),
+            id = serverId,
             displayName = metadata.displayName,
             enteredAddress = endpoint.enteredAddress,
             frozenIpv4 = endpoint.frozenIpv4,
             sshPort = endpoint.sshPort,
             sshLogin = metadata.sshLogin,
             hostKey = hostKey,
+            keystoreAlias = keystoreAlias,
             verifiedAtEpochMillis = System.currentTimeMillis(),
         )
         val records = try {
@@ -420,7 +545,7 @@ class AdminViewModel(
         mutableState.value = AdminUiState(
             route = AdminRoute.ServerList,
             servers = records,
-            notice = "Сервер добавлен. SSH-доступ проверен",
+            notice = "Сервер добавлен",
         )
     }
 
@@ -467,11 +592,13 @@ class AdminViewModel(
         is SshFailure.HostKeyChanged -> "SSH host key изменился. Начните проверку заново"
         is SshFailure.AuthenticationFailed -> "SSH-аутентификация не прошла"
         is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        is MissingAdministrativeAccessException -> "Нужен root или sudo без пароля"
         is ImportedSshIdentityException -> "Не удалось прочитать SSH private key"
+        is ServerAlreadyAddedException -> "Этот сервер уже добавлен"
         is KnownHostKeyChangedException ->
             "SSH host key отличается от сохранённого. Автоматическая замена запрещена"
-        is LocalPersistenceException -> "SSH-доступ проверен, но сервер не удалось сохранить"
-        else -> "Не удалось проверить SSH-доступ"
+        is LocalPersistenceException -> "Не удалось сохранить сервер"
+        else -> "Не удалось настроить SSH-доступ"
     }
 
     private fun updateAddServerForm(transform: AddServerState.() -> AddServerState) {
@@ -535,17 +662,28 @@ class AdminViewModel(
     )
 
     companion object {
+        private const val SSH_CHECK_COMMAND =
+            "LC_ALL=C; export LC_ALL; id -un && hostname && uptime -p"
+
         fun factory(context: Context): ViewModelProvider.Factory {
             val applicationContext = context.applicationContext
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     require(modelClass.isAssignableFrom(AdminViewModel::class.java))
+                    val identityStore = AndroidKeystoreSshIdentityStore(applicationContext)
+                    val sshAccessChecker = SshjAccessChecker(identityStore)
                     return AdminViewModel(
                         serverStore = SharedPreferencesServerStore(applicationContext),
                         endpointResolver = EndpointResolver(),
-                        sshAccessChecker = SshjAccessChecker(),
+                        sshAccessChecker = sshAccessChecker,
                         importedKeyReader = ImportedKeyReader(applicationContext.contentResolver),
+                        identityStore = identityStore,
+                        managedAccessBootstrapper = ManagedAccessBootstrapper(
+                            ssh = sshAccessChecker,
+                            identityStore = identityStore,
+                            installer = AuthorizedKeyInstaller(applicationContext),
+                        ),
                     ) as T
                 }
             }
@@ -554,6 +692,8 @@ class AdminViewModel(
 }
 
 private class KnownHostKeyChangedException : IllegalStateException()
+
+private class ServerAlreadyAddedException : IllegalStateException()
 
 private class LocalPersistenceException(cause: Throwable) :
     IllegalStateException("Failed to save verified server", cause)

@@ -20,6 +20,8 @@ android {
         compose = true
     }
 
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("ssh-scripts"))
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true

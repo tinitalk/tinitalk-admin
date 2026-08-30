@@ -5,6 +5,7 @@
 /local.properties
 
 **/build/
+/dist/
 /captures/
 /.externalNativeBuild/
 /.cxx/

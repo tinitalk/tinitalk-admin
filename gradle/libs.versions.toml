@@ -4,6 +4,11 @@ kotlin = "2.2.20"
 coreKtx = "1.17.0"
 activity = "1.10.1"
 composeBom = "2026.06.00"
+coroutines = "1.8.1"
+gson = "2.11.0"
+junit = "4.13.2"
+lifecycle = "2.10.0"
+sshj = "0.40.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -18,3 +23,8 @@ androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = 
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+junit = { module = "junit:junit", version.ref = "junit" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }

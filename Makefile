@@ -27,11 +27,11 @@ endif
 
 client:
 	@$(CREATE_DIST)
-	@$(call RUN_GRADLE,lintDebug assembleDebug)
+	@$(call RUN_GRADLE,testDebugUnitTest lintDebug assembleDebug)
 	@$(COPY_CLIENT)
 
 check:
-	@$(call RUN_GRADLE,lintDebug assembleDebug assembleRelease)
+	@$(call RUN_GRADLE,testDebugUnitTest lintDebug assembleDebug assembleRelease)
 
 clean:
 	@$(call RUN_GRADLE,clean)

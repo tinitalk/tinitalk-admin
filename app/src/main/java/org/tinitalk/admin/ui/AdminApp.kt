@@ -29,15 +29,20 @@ fun AdminApp(viewModel: AdminViewModel) {
         }
     }
 
-    BackHandler(enabled = state.route == AdminRoute.AddServer) {
-        viewModel.closeAddServer()
+    BackHandler(enabled = state.route != AdminRoute.ServerList) {
+        when (state.route) {
+            AdminRoute.AddServer -> viewModel.closeAddServer()
+            is AdminRoute.ServerDetails -> viewModel.closeServer()
+            AdminRoute.ServerList -> Unit
+        }
     }
 
-    when (state.route) {
+    when (val route = state.route) {
         AdminRoute.ServerList -> ServerListScreen(
             servers = state.servers,
             snackbarHostState = snackbarHostState,
             onAddServer = viewModel::openAddServer,
+            onOpenServer = viewModel::openServer,
             modifier = Modifier.fillMaxSize().systemBarsPadding(),
         )
 
@@ -54,12 +59,23 @@ fun AdminApp(viewModel: AdminViewModel) {
             onAuthenticationChange = viewModel::updateAuthentication,
             onPasswordChange = viewModel::updatePassword,
             onPassphraseChange = viewModel::updatePrivateKeyPassphrase,
-            onVerifyPassword = viewModel::verifyWithPassword,
             onChoosePrivateKey = {
                 privateKeyPicker.launch(arrayOf("application/octet-stream", "text/plain", "*/*"))
             },
-            onRetry = viewModel::retryAddServer,
             modifier = Modifier.fillMaxSize().systemBarsPadding(),
         )
+
+        is AdminRoute.ServerDetails -> state.servers
+            .firstOrNull { it.id == route.serverId }
+            ?.let { server ->
+                ServerDetailsScreen(
+                    server = server,
+                    snackbarHostState = snackbarHostState,
+                    onBack = viewModel::closeServer,
+                    onRename = { viewModel.renameServer(server.id, it) },
+                    onRemove = { viewModel.removeServer(server.id) },
+                    modifier = Modifier.fillMaxSize().systemBarsPadding(),
+                )
+            }
     }
 }

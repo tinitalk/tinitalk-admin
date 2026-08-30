@@ -14,12 +14,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -33,15 +36,20 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import org.tinitalk.admin.R
 import org.tinitalk.admin.model.ServerRecord
+import org.tinitalk.admin.model.displayTitle
 
 @Composable
 fun ServerListScreen(
     servers: List<ServerRecord>,
     snackbarHostState: SnackbarHostState,
     onAddServer: () -> Unit,
+    onOpenServer: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -54,9 +62,16 @@ fun ServerListScreen(
                     .background(MaterialTheme.colorScheme.background)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                Button(
+                OutlinedButton(
                     onClick = onAddServer,
                     shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
                     contentPadding = PaddingValues(vertical = 14.dp),
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
@@ -81,7 +96,7 @@ fun ServerListScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(servers, key = ServerRecord::id) { server ->
-                        ServerCard(server)
+                        ServerCard(server, onClick = { onOpenServer(server.id) })
                     }
                 }
             }
@@ -140,8 +155,9 @@ private fun EmptyServerList(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ServerCard(server: ServerRecord) {
+private fun ServerCard(server: ServerRecord, onClick: () -> Unit) {
     Surface(
+        onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(22.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.78f)),
@@ -158,17 +174,32 @@ private fun ServerCard(server: ServerRecord) {
                 modifier = Modifier.weight(1f),
             ) {
                 Text(
-                    text = server.displayName,
+                    text = server.displayTitle,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (server.displayName != server.enteredAddress) {
+                if (server.displayName.isNotEmpty()) {
                     Text(
                         text = server.enteredAddress,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
+            }
+            Spacer(Modifier.width(12.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_chevron_right),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(23.dp),
+                )
             }
         }
     }

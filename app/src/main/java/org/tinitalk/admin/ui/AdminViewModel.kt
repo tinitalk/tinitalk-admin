@@ -34,15 +34,14 @@ import kotlinx.coroutines.withContext
 sealed interface AdminRoute {
     data object ServerList : AdminRoute
     data object AddServer : AdminRoute
+    data class ServerDetails(val serverId: String) : AdminRoute
 }
 
 sealed interface AddServerPhase {
-    data object EndpointForm : AddServerPhase
+    data object Form : AddServerPhase
     data object ScanningFingerprint : AddServerPhase
     data class ConfirmFingerprint(val key: PinnedHostKey) : AddServerPhase
-    data object Credentials : AddServerPhase
     data object CheckingAccess : AddServerPhase
-    data class Failed(val message: String) : AddServerPhase
 }
 
 enum class AuthenticationMethod {
@@ -59,7 +58,8 @@ data class AddServerState(
     val authentication: AuthenticationMethod = AuthenticationMethod.PASSWORD,
     val password: String = "",
     val privateKeyPassphrase: String = "",
-    val phase: AddServerPhase = AddServerPhase.EndpointForm,
+    val privateKeySelected: Boolean = false,
+    val phase: AddServerPhase = AddServerPhase.Form,
     val errorMessage: String? = null,
 )
 
@@ -91,9 +91,11 @@ class AdminViewModel(
     private var currentJob: Job? = null
     private var pendingEndpoint: ResolvedEndpoint? = null
     private var pendingHostKey: PinnedHostKey? = null
+    private var selectedPrivateKeyUri: Uri? = null
 
     fun openAddServer() {
         invalidateOperation()
+        selectedPrivateKeyUri = null
         mutableState.update {
             it.copy(
                 route = AdminRoute.AddServer,
@@ -104,8 +106,12 @@ class AdminViewModel(
     }
 
     fun closeAddServer() {
-        if (mutableState.value.addServer.phase == AddServerPhase.CheckingAccess) return
+        if (
+            mutableState.value.addServer.phase == AddServerPhase.ScanningFingerprint ||
+            mutableState.value.addServer.phase == AddServerPhase.CheckingAccess
+        ) return
         invalidateOperation()
+        selectedPrivateKeyUri = null
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerList,
@@ -114,28 +120,75 @@ class AdminViewModel(
         }
     }
 
+    fun openServer(serverId: String) {
+        if (mutableState.value.servers.none { it.id == serverId }) return
+        mutableState.update { it.copy(route = AdminRoute.ServerDetails(serverId), notice = null) }
+    }
+
+    fun closeServer() {
+        mutableState.update { it.copy(route = AdminRoute.ServerList) }
+    }
+
+    fun renameServer(serverId: String, value: String) {
+        if (mutableState.value.servers.none { it.id == serverId }) return
+        val displayName = value.trim()
+        viewModelScope.launch {
+            updateSavedServers("Не удалось изменить название сервера") {
+                serverStore.rename(serverId, displayName)
+            }
+        }
+    }
+
+    fun removeServer(serverId: String) {
+        if (mutableState.value.servers.none { it.id == serverId }) return
+        viewModelScope.launch {
+            val records = try {
+                withContext(Dispatchers.IO) {
+                    serverStore.remove(serverId)
+                    serverStore.list()
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { it.copy(notice = "Не удалось удалить сервер из приложения") }
+                return@launch
+            }
+            mutableState.update {
+                it.copy(
+                    route = AdminRoute.ServerList,
+                    servers = records,
+                    notice = "Сервер удалён из приложения",
+                )
+            }
+        }
+    }
+
     fun clearNotice() {
         mutableState.update { it.copy(notice = null) }
     }
 
-    fun updateDisplayName(value: String) = updateEndpointForm { copy(displayName = value) }
-    fun updateAddress(value: String) = updateEndpointForm { copy(address = value) }
-    fun updateSshPort(value: String) = updateEndpointForm { copy(sshPort = value) }
-    fun updateSshLogin(value: String) = updateEndpointForm { copy(sshLogin = value) }
+    fun updateDisplayName(value: String) = updateAddServerForm { copy(displayName = value) }
+    fun updateAddress(value: String) = updateAddServerForm { copy(address = value) }
+    fun updateSshPort(value: String) = updateAddServerForm { copy(sshPort = value) }
+    fun updateSshLogin(value: String) = updateAddServerForm { copy(sshLogin = value) }
 
-    fun updateAuthentication(value: AuthenticationMethod) = updateCredentials {
-        if (authentication == value) return@updateCredentials this
+    fun updateAuthentication(value: AuthenticationMethod) = updateAddServerForm {
+        if (authentication == value) return@updateAddServerForm this
+        selectedPrivateKeyUri = null
         copy(
             authentication = value,
             password = "",
             privateKeyPassphrase = "",
+            privateKeySelected = false,
             errorMessage = null,
         )
     }
 
-    fun updatePassword(value: String) = updateCredentials { copy(password = value, errorMessage = null) }
+    fun updatePassword(value: String) = updateAddServerForm {
+        copy(password = value, errorMessage = null)
+    }
 
-    fun updatePrivateKeyPassphrase(value: String) = updateCredentials {
+    fun updatePrivateKeyPassphrase(value: String) = updateAddServerForm {
         copy(privateKeyPassphrase = value, errorMessage = null)
     }
 
@@ -154,6 +207,21 @@ class AdminViewModel(
             }
             return
         }
+        if (form.authentication == AuthenticationMethod.PASSWORD && form.password.isEmpty()) {
+            mutableState.update {
+                it.copy(addServer = form.copy(errorMessage = "Укажите SSH-пароль"))
+            }
+            return
+        }
+        if (
+            form.authentication == AuthenticationMethod.PRIVATE_KEY &&
+            selectedPrivateKeyUri == null
+        ) {
+            mutableState.update {
+                it.copy(addServer = form.copy(errorMessage = "Выберите private key"))
+            }
+            return
+        }
 
         val id = nextOperation()
         mutableState.update {
@@ -164,8 +232,6 @@ class AdminViewModel(
                     sshPort = validated.port.toString(),
                     sshLogin = validated.login,
                     frozenIpv4 = null,
-                    password = "",
-                    privateKeyPassphrase = "",
                     phase = AddServerPhase.ScanningFingerprint,
                     errorMessage = null,
                 ),
@@ -196,7 +262,7 @@ class AdminViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (isCurrent(id)) failAdd(error)
+                if (isCurrent(id)) failAdd(error, clearSecrets = false)
             } finally {
                 if (isCurrent(id)) currentJob = null
             }
@@ -209,9 +275,7 @@ class AdminViewModel(
             it.copy(
                 addServer = it.addServer.copy(
                     frozenIpv4 = null,
-                    password = "",
-                    privateKeyPassphrase = "",
-                    phase = AddServerPhase.EndpointForm,
+                    phase = AddServerPhase.Form,
                     errorMessage = null,
                 ),
             )
@@ -222,44 +286,39 @@ class AdminViewModel(
         if (pendingEndpoint == null || pendingHostKey == null) return
         val add = mutableState.value.addServer
         if (add.phase !is AddServerPhase.ConfirmFingerprint) return
+        when (add.authentication) {
+            AuthenticationMethod.PASSWORD -> {
+                val password = add.password.toCharArray()
+                verifyAccess(SshCredential.Password(password))
+            }
+
+            AuthenticationMethod.PRIVATE_KEY -> verifyAccessWithPrivateKey()
+        }
+    }
+
+    fun privateKeySelected(uri: Uri?) {
+        val add = mutableState.value.addServer
+        if (
+            add.phase != AddServerPhase.Form ||
+            add.authentication != AuthenticationMethod.PRIVATE_KEY
+        ) return
+        if (uri == null) return
+        selectedPrivateKeyUri = uri
         mutableState.update {
             it.copy(
                 addServer = add.copy(
-                    phase = AddServerPhase.Credentials,
+                    privateKeySelected = true,
                     errorMessage = null,
                 ),
             )
         }
     }
 
-    fun verifyWithPassword() {
-        val add = mutableState.value.addServer
-        if (add.phase != AddServerPhase.Credentials) return
-        if (add.password.isEmpty()) {
-            mutableState.update {
-                it.copy(addServer = add.copy(errorMessage = "Укажите SSH-пароль"))
-            }
-            return
-        }
-        val password = add.password.toCharArray()
-        verifyAccess(SshCredential.Password(password))
-    }
-
-    fun privateKeySelected(uri: Uri?) {
-        val add = mutableState.value.addServer
-        if (
-            add.phase != AddServerPhase.Credentials ||
-            add.authentication != AuthenticationMethod.PRIVATE_KEY
-        ) return
-        if (uri == null) {
-            mutableState.update {
-                it.copy(addServer = add.copy(privateKeyPassphrase = ""))
-            }
-            return
-        }
-
+    private fun verifyAccessWithPrivateKey() {
+        val uri = selectedPrivateKeyUri ?: return
         val endpoint = pendingEndpoint ?: return
         val hostKey = pendingHostKey ?: return
+        val add = mutableState.value.addServer
         val metadata = PendingServerMetadata(add.displayName, add.sshLogin)
         val passphrase = add.privateKeyPassphrase.toCharArray()
         val id = nextOperation()
@@ -274,38 +333,25 @@ class AdminViewModel(
             )
         }
         currentJob = viewModelScope.launch {
+            var credential: SshCredential? = null
             try {
-                val identity = importedKeyReader.read(uri, passphrase)
+                credential = SshCredential.ImportedKey(importedKeyReader.read(uri, passphrase))
                 sshAccessChecker.verifyAccess(
                     endpoint = endpoint,
                     login = metadata.sshLogin,
-                    credential = SshCredential.ImportedKey(identity),
+                    credential = credential,
                     pinnedHostKey = hostKey,
                 )
                 if (isCurrent(id)) persistSuccessfulCheck(endpoint, hostKey, metadata)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (isCurrent(id)) failAdd(error)
+                if (isCurrent(id)) failAdd(error, clearSecrets = true)
             } finally {
+                credential?.close()
                 passphrase.fill('\u0000')
                 if (isCurrent(id)) currentJob = null
             }
-        }
-    }
-
-    fun retryAddServer() {
-        invalidateOperation()
-        mutableState.update {
-            it.copy(
-                addServer = it.addServer.copy(
-                    frozenIpv4 = null,
-                    password = "",
-                    privateKeyPassphrase = "",
-                    phase = AddServerPhase.EndpointForm,
-                    errorMessage = null,
-                ),
-            )
         }
     }
 
@@ -337,7 +383,7 @@ class AdminViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (isCurrent(id)) failAdd(error)
+                if (isCurrent(id)) failAdd(error, clearSecrets = true)
             } finally {
                 credential.close()
                 if (isCurrent(id)) currentJob = null
@@ -395,21 +441,22 @@ class AdminViewModel(
             address = parsed.enteredAddress,
             port = parsed.sshPort,
             login = login,
-            displayName = form.displayName.trim().ifEmpty { parsed.enteredAddress },
+            displayName = form.displayName.trim(),
         )
     }
 
-    private fun failAdd(error: Exception) {
+    private fun failAdd(error: Exception, clearSecrets: Boolean) {
         pendingEndpoint = null
         pendingHostKey = null
         mutableState.update {
+            val add = it.addServer
             it.copy(
-                addServer = it.addServer.copy(
+                addServer = add.copy(
                     frozenIpv4 = null,
-                    password = "",
-                    privateKeyPassphrase = "",
-                    phase = AddServerPhase.Failed(safeErrorMessage(error)),
-                    errorMessage = null,
+                    password = if (clearSecrets) "" else add.password,
+                    privateKeyPassphrase = if (clearSecrets) "" else add.privateKeyPassphrase,
+                    phase = AddServerPhase.Form,
+                    errorMessage = safeErrorMessage(error),
                 ),
             )
         }
@@ -427,16 +474,28 @@ class AdminViewModel(
         else -> "Не удалось проверить SSH-доступ"
     }
 
-    private fun updateEndpointForm(transform: AddServerState.() -> AddServerState) {
+    private fun updateAddServerForm(transform: AddServerState.() -> AddServerState) {
         val add = mutableState.value.addServer
-        if (add.phase != AddServerPhase.EndpointForm) return
+        if (add.phase != AddServerPhase.Form) return
         mutableState.update { it.copy(addServer = add.transform().copy(errorMessage = null)) }
     }
 
-    private fun updateCredentials(transform: AddServerState.() -> AddServerState) {
-        val add = mutableState.value.addServer
-        if (add.phase != AddServerPhase.Credentials) return
-        mutableState.update { it.copy(addServer = add.transform()) }
+    private suspend fun updateSavedServers(
+        errorMessage: String,
+        update: () -> Unit,
+    ) {
+        val records = try {
+            withContext(Dispatchers.IO) {
+                update()
+                serverStore.list()
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            mutableState.update { it.copy(notice = errorMessage) }
+            return
+        }
+        mutableState.update { it.copy(servers = records) }
     }
 
     private fun nextOperation(): Long {
@@ -458,6 +517,7 @@ class AdminViewModel(
         operationId += 1
         pendingEndpoint = null
         pendingHostKey = null
+        selectedPrivateKeyUri = null
     }
 
     private fun isCurrent(id: Long): Boolean = id == operationId

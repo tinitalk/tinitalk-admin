@@ -18,3 +18,6 @@ data class ServerRecord(
     @SerializedName("host_key") val hostKey: PinnedHostKey,
     @SerializedName("verified_at_epoch_millis") val verifiedAtEpochMillis: Long,
 )
+
+val ServerRecord.displayTitle: String
+    get() = displayName.ifBlank { enteredAddress }

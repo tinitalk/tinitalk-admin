@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,12 +44,12 @@ fun AddServerScreen(
     onAuthenticationChange: (AuthenticationMethod) -> Unit,
     onPasswordChange: (String) -> Unit,
     onPassphraseChange: (String) -> Unit,
-    onVerifyPassword: () -> Unit,
     onChoosePrivateKey: () -> Unit,
-    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val endpointEditable = state.phase == AddServerPhase.EndpointForm
+    val formEnabled = state.phase == AddServerPhase.Form
+    val operationInProgress = state.phase == AddServerPhase.ScanningFingerprint ||
+        state.phase == AddServerPhase.CheckingAccess
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
@@ -56,65 +57,42 @@ fun AddServerScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
-        TextButton(
-            onClick = onBack,
-            enabled = state.phase != AddServerPhase.CheckingAccess,
-        ) {
-            Text("← Назад")
-        }
-        Text(
-            text = "Добавить сервер",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
+        ScreenHeader(
+            title = "Добавить сервер",
+            onBack = onBack,
+            backEnabled = !operationInProgress,
         )
-        if (state.phase is AddServerPhase.EndpointForm ||
-            state.phase is AddServerPhase.ScanningFingerprint ||
-            state.phase is AddServerPhase.ConfirmFingerprint
-        ) {
-            EndpointFields(
-                state = state,
-                enabled = endpointEditable,
-                onDisplayNameChange = onDisplayNameChange,
-                onAddressChange = onAddressChange,
-                onPortChange = onPortChange,
-                onLoginChange = onLoginChange,
-            )
-        } else {
-            EndpointSummary(state)
-        }
+        EndpointFields(
+            state = state,
+            enabled = formEnabled,
+            onDisplayNameChange = onDisplayNameChange,
+            onAddressChange = onAddressChange,
+            onPortChange = onPortChange,
+            onLoginChange = onLoginChange,
+        )
+        CredentialsForm(
+            state = state,
+            enabled = formEnabled,
+            onAuthenticationChange = onAuthenticationChange,
+            onPasswordChange = onPasswordChange,
+            onPassphraseChange = onPassphraseChange,
+            onChoosePrivateKey = onChoosePrivateKey,
+        )
 
         state.errorMessage?.let { ErrorPanel(it) }
 
-        when (val phase = state.phase) {
-            AddServerPhase.EndpointForm -> Button(
+        when (state.phase) {
+            AddServerPhase.Form -> Button(
                 onClick = onScanFingerprint,
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                Text("Получить SSH fingerprint")
+                Text("Добавить")
             }
 
             AddServerPhase.ScanningFingerprint -> ProgressRow("Получаем SSH fingerprint…")
             is AddServerPhase.ConfirmFingerprint -> Unit
-            AddServerPhase.Credentials -> CredentialsForm(
-                state = state,
-                onAuthenticationChange = onAuthenticationChange,
-                onPasswordChange = onPasswordChange,
-                onPassphraseChange = onPassphraseChange,
-                onVerifyPassword = onVerifyPassword,
-                onChoosePrivateKey = onChoosePrivateKey,
-            )
-
             AddServerPhase.CheckingAccess -> ProgressRow("Проверяем SSH-доступ…")
-            is AddServerPhase.Failed -> {
-                ErrorPanel(phase.message)
-                OutlinedButton(
-                    onClick = onRetry,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    Text("Попробовать снова")
-                }
-            }
         }
         Spacer(Modifier.height(12.dp))
     }
@@ -196,36 +174,12 @@ private fun EndpointFields(
 }
 
 @Composable
-private fun EndpointSummary(state: AddServerState) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(16.dp),
-        ) {
-            Text(state.displayName, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "${state.sshLogin}@${state.address}:${state.sshPort}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            state.frozenIpv4?.let {
-                Text("IP: $it", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
 private fun CredentialsForm(
     state: AddServerState,
+    enabled: Boolean,
     onAuthenticationChange: (AuthenticationMethod) -> Unit,
     onPasswordChange: (String) -> Unit,
     onPassphraseChange: (String) -> Unit,
-    onVerifyPassword: () -> Unit,
     onChoosePrivateKey: () -> Unit,
 ) {
     Text(
@@ -237,12 +191,14 @@ private fun CredentialsForm(
         AuthenticationButton(
             text = "Пароль",
             selected = state.authentication == AuthenticationMethod.PASSWORD,
+            enabled = enabled,
             onClick = { onAuthenticationChange(AuthenticationMethod.PASSWORD) },
             modifier = Modifier.weight(1f),
         )
         AuthenticationButton(
             text = "Private key",
             selected = state.authentication == AuthenticationMethod.PRIVATE_KEY,
+            enabled = enabled,
             onClick = { onAuthenticationChange(AuthenticationMethod.PRIVATE_KEY) },
             modifier = Modifier.weight(1f),
         )
@@ -251,33 +207,37 @@ private fun CredentialsForm(
         OutlinedTextField(
             value = state.password,
             onValueChange = onPasswordChange,
+            enabled = enabled,
             label = { Text("SSH-пароль") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Button(
-            onClick = onVerifyPassword,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) {
-            Text("Проверить и добавить")
-        }
     } else {
         OutlinedTextField(
             value = state.privateKeyPassphrase,
             onValueChange = onPassphraseChange,
+            enabled = enabled,
             label = { Text("Passphrase ключа (если есть)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Button(
+        OutlinedButton(
             onClick = onChoosePrivateKey,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Выбрать private key и проверить")
+            Text(if (state.privateKeySelected) "Выбрать другой private key" else "Выбрать private key")
+        }
+        if (state.privateKeySelected) {
+            Text(
+                text = "Private key выбран",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         Text(
             text = "Файл ключа используется один раз и не сохраняется приложением.",
@@ -291,13 +251,31 @@ private fun CredentialsForm(
 private fun AuthenticationButton(
     text: String,
     selected: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (selected) {
-        Button(onClick = onClick, modifier = modifier) { Text(text) }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = modifier) { Text(text) }
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.outline
+            },
+        ),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        ),
+        modifier = modifier,
+    ) {
+        Text(text)
     }
 }
 

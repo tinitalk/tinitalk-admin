@@ -5,10 +5,13 @@ import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import org.tinitalk.admin.model.PinnedHostKey
 import org.tinitalk.admin.model.ServerRecord
+import org.tinitalk.admin.model.displayTitle
 
 interface ServerStore {
     fun list(): List<ServerRecord>
     fun put(record: ServerRecord)
+    fun rename(id: String, displayName: String)
+    fun remove(id: String)
 }
 
 class SharedPreferencesServerStore(
@@ -33,6 +36,24 @@ class SharedPreferencesServerStore(
         } else {
             records += record
         }
+        writeRecords(records)
+    }
+
+    override fun rename(id: String, displayName: String) = synchronized(lock) {
+        val records = readRecords().toMutableList()
+        val index = records.indexOfFirst { it.id == id }
+        check(index >= 0) { "Server not found" }
+        records[index] = records[index].copy(displayName = displayName)
+        writeRecords(records)
+    }
+
+    override fun remove(id: String) = synchronized(lock) {
+        val records = readRecords().toMutableList()
+        check(records.removeAll { it.id == id }) { "Server not found" }
+        writeRecords(records)
+    }
+
+    private fun writeRecords(records: List<ServerRecord>) {
         val json = gson.toJson(
             ServerEnvelope(
                 version = CURRENT_VERSION,
@@ -93,7 +114,7 @@ class SharedPreferencesServerStore(
         fun toModel(): ServerRecord {
             val model = ServerRecord(
                 id = id.required("id"),
-                displayName = displayName.required("display_name"),
+                displayName = displayName.present("display_name"),
                 enteredAddress = enteredAddress.required("entered_address"),
                 frozenIpv4 = frozenIpv4.required("frozen_ipv4"),
                 sshPort = requireNotNull(sshPort) { "Missing saved field: ssh_port" },
@@ -127,12 +148,15 @@ class SharedPreferencesServerStore(
         const val RECORDS_KEY = "server_records_v1"
         const val QUARANTINED_RECORDS_KEY = "server_records_unreadable"
         const val CURRENT_VERSION = 1
-        val RECORD_ORDER = compareBy<ServerRecord>({ it.displayName.lowercase() }, { it.id })
+        val RECORD_ORDER = compareBy<ServerRecord>({ it.displayTitle.lowercase() }, { it.id })
     }
 }
 
 private fun String?.required(field: String): String =
     requireNotNull(this?.takeIf(String::isNotBlank)) { "Missing saved field: $field" }
+
+private fun String?.present(field: String): String =
+    requireNotNull(this) { "Missing saved field: $field" }
 
 private fun ServerRecord.hasSameHostAs(other: ServerRecord): Boolean =
     enteredAddress == other.enteredAddress &&

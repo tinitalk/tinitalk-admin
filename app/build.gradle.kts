@@ -5,6 +5,11 @@ plugins {
 }
 
 val repositoryDir = rootDir
+val tinitalkAdminAbi = providers.gradleProperty("tinitalkAdminAbi").getOrElse("all")
+require(tinitalkAdminAbi == "arm64" || tinitalkAdminAbi == "all") {
+    "tinitalkAdminAbi must be 'arm64' or 'all'"
+}
+
 val commitHash = runCatching {
     val process = ProcessBuilder(
         "git",
@@ -30,6 +35,11 @@ android {
         versionCode = 1
         versionName = "0.1"
         buildConfigField("String", "COMMIT_HASH", "\"$commitHash\"")
+        if (tinitalkAdminAbi == "arm64") {
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
+        }
     }
 
     buildFeatures {
@@ -43,11 +53,20 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
         }
+    }
+
+    packaging {
+        resources.excludes += setOf(
+            "/org/bouncycastle/pqc/crypto/picnic/lowmcL1.bin.properties",
+            "/org/bouncycastle/pqc/crypto/picnic/lowmcL3.bin.properties",
+            "/org/bouncycastle/pqc/crypto/picnic/lowmcL5.bin.properties",
+        )
     }
 
     compileOptions {

@@ -2,17 +2,18 @@ package org.tinitalk.admin.data
 
 import android.content.Context
 import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
 import org.tinitalk.admin.server.InitialSetupStep
 
 data class StoredServerSetup(
-    val configured: Boolean,
-    val startedAtEpochMillis: Long? = null,
-    val currentStep: InitialSetupStep? = null,
-    val operationStarted: Boolean = false,
-    val completedSteps: Set<InitialSetupStep>? = null,
-    val binaryUri: String? = null,
-    val firebaseAndroidConfigUri: String? = null,
-    val firebaseServiceAccountUri: String? = null,
+    @SerializedName("configured") val configured: Boolean,
+    @SerializedName("startedAtEpochMillis") val startedAtEpochMillis: Long? = null,
+    @SerializedName("currentStep") val currentStep: InitialSetupStep? = null,
+    @SerializedName("operationStarted") val operationStarted: Boolean = false,
+    @SerializedName("completedSteps") val completedSteps: Set<InitialSetupStep>? = null,
+    @SerializedName("binaryUri") val binaryUri: String? = null,
+    @SerializedName("firebaseAndroidConfigUri") val firebaseAndroidConfigUri: String? = null,
+    @SerializedName("firebaseServiceAccountUri") val firebaseServiceAccountUri: String? = null,
 ) {
     val inProgress: Boolean
         get() = !configured && startedAtEpochMillis != null && currentStep != null

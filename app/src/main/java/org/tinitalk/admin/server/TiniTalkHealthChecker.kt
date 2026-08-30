@@ -51,10 +51,10 @@ class TiniTalkHealthChecker {
     }
 
     private data class HealthResponse(
-        val service: String?,
-        val status: String?,
+        @SerializedName("service") val service: String?,
+        @SerializedName("status") val status: String?,
         @SerializedName("api_version") val apiVersion: Int = 0,
-        val commit: String? = null,
+        @SerializedName("commit") val commit: String? = null,
     )
 
     private companion object {

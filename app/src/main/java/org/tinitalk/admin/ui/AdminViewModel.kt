@@ -1,7 +1,10 @@
 package org.tinitalk.admin.ui
 
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -14,7 +17,14 @@ import org.tinitalk.admin.server.AddressKind
 import org.tinitalk.admin.server.EndpointParser
 import org.tinitalk.admin.server.EndpointResolver
 import org.tinitalk.admin.server.EndpointValidationException
+import org.tinitalk.admin.server.RemoteOperationState
+import org.tinitalk.admin.server.RemoteOperationUpload
+import org.tinitalk.admin.server.RemoteServerOperation
+import org.tinitalk.admin.server.RemoteServerOperationRunner
 import org.tinitalk.admin.server.ResolvedEndpoint
+import org.tinitalk.admin.server.ServerOperationKind
+import org.tinitalk.admin.server.TiniTalkStatus
+import org.tinitalk.admin.server.TiniTalkStatusChecker
 import org.tinitalk.admin.ssh.ImportedKeyReader
 import org.tinitalk.admin.ssh.ImportedSshIdentityException
 import org.tinitalk.admin.ssh.AndroidKeystoreSshIdentityStore
@@ -23,6 +33,7 @@ import org.tinitalk.admin.ssh.ManagedAccessBootstrapper
 import org.tinitalk.admin.ssh.ManagedSshIdentityStore
 import org.tinitalk.admin.ssh.MissingAdministrativeAccessException
 import org.tinitalk.admin.ssh.SshAccessChecker
+import org.tinitalk.admin.ssh.SshConnection
 import org.tinitalk.admin.ssh.SshCredential
 import org.tinitalk.admin.ssh.SshFailure
 import org.tinitalk.admin.ssh.SshjAccessChecker
@@ -30,6 +41,7 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,7 +87,29 @@ data class AdminUiState(
     val addServer: AddServerState = AddServerState(),
     val sshCheckInProgress: Boolean = false,
     val sshCheckResult: SshCheckResult? = null,
+    val tinitalkStatusInProgress: Boolean = false,
+    val tinitalkStatusResult: TiniTalkStatus? = null,
+    val serverOperation: RunningServerOperation? = null,
+    val tinitalkFiles: TiniTalkFilesState = TiniTalkFilesState(),
     val notice: String? = null,
+)
+
+data class TiniTalkFilesState(
+    val visible: Boolean = false,
+    val binaryName: String? = null,
+    val firebaseAndroidConfigName: String? = null,
+    val firebaseServiceAccountName: String? = null,
+) {
+    val ready: Boolean
+        get() = binaryName != null &&
+            firebaseAndroidConfigName != null &&
+            firebaseServiceAccountName != null
+}
+
+data class RunningServerOperation(
+    val serverId: String,
+    val kind: ServerOperationKind,
+    val startedAt: Long,
 )
 
 data class SshCheckResult(
@@ -85,12 +119,15 @@ data class SshCheckResult(
 )
 
 class AdminViewModel(
+    private val contentResolver: ContentResolver,
     private val serverStore: ServerStore,
     private val endpointResolver: EndpointResolver,
     private val sshAccessChecker: SshAccessChecker,
     private val importedKeyReader: ImportedKeyReader,
     private val identityStore: ManagedSshIdentityStore,
     private val managedAccessBootstrapper: ManagedAccessBootstrapper,
+    private val tinitalkStatusChecker: TiniTalkStatusChecker,
+    private val remoteOperationRunner: RemoteServerOperationRunner,
 ) : ViewModel() {
     private val initialServers = runCatching(serverStore::list)
     private val mutableState = MutableStateFlow(
@@ -106,9 +143,14 @@ class AdminViewModel(
     private var operationId = 0L
     private var currentJob: Job? = null
     private var sshCheckJob: Job? = null
+    private var tinitalkStatusJob: Job? = null
+    private var serverOperationJob: Job? = null
     private var pendingEndpoint: ResolvedEndpoint? = null
     private var pendingHostKey: PinnedHostKey? = null
     private var selectedPrivateKeyUri: Uri? = null
+    private var selectedTiniTalkBinaryUri: Uri? = null
+    private var selectedFirebaseAndroidConfigUri: Uri? = null
+    private var selectedFirebaseServiceAccountUri: Uri? = null
 
     fun openAddServer() {
         invalidateOperation()
@@ -141,24 +183,35 @@ class AdminViewModel(
         if (mutableState.value.servers.none { it.id == serverId }) return
         sshCheckJob?.cancel()
         sshCheckJob = null
+        tinitalkStatusJob?.cancel()
+        tinitalkStatusJob = null
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerDetails(serverId),
                 sshCheckInProgress = false,
                 sshCheckResult = null,
+                tinitalkStatusInProgress = false,
+                tinitalkStatusResult = null,
                 notice = null,
             )
         }
+        discoverServerOperation(serverId)
     }
 
     fun closeServer() {
         sshCheckJob?.cancel()
         sshCheckJob = null
+        tinitalkStatusJob?.cancel()
+        tinitalkStatusJob = null
+        clearSelectedTiniTalkFiles()
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerList,
                 sshCheckInProgress = false,
                 sshCheckResult = null,
+                tinitalkStatusInProgress = false,
+                tinitalkStatusResult = null,
+                tinitalkFiles = TiniTalkFilesState(),
             )
         }
     }
@@ -196,6 +249,281 @@ class AdminViewModel(
 
     fun dismissSshCheckResult() {
         mutableState.update { it.copy(sshCheckResult = null) }
+    }
+
+    fun checkTiniTalkStatus(serverId: String) {
+        if (tinitalkStatusJob?.isActive == true) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        mutableState.update {
+            it.copy(
+                tinitalkStatusInProgress = true,
+                tinitalkStatusResult = null,
+                notice = null,
+            )
+        }
+        tinitalkStatusJob = viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { runTiniTalkStatusCheck(server) }
+                if (mutableState.value.route == AdminRoute.ServerDetails(serverId)) {
+                    mutableState.update {
+                        it.copy(tinitalkStatusInProgress = false, tinitalkStatusResult = result)
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == AdminRoute.ServerDetails(serverId)) {
+                    mutableState.update {
+                        it.copy(
+                            tinitalkStatusInProgress = false,
+                            notice = tinitalkStatusErrorMessage(error),
+                        )
+                    }
+                }
+            } finally {
+                tinitalkStatusJob = null
+            }
+        }
+    }
+
+    fun dismissTiniTalkStatus() {
+        mutableState.update { it.copy(tinitalkStatusResult = null) }
+    }
+
+    fun installSystemPackages(serverId: String) {
+        startServerOperation(
+            serverId = serverId,
+            kind = ServerOperationKind.INSTALL_SYSTEM_PACKAGES,
+            arguments = emptyList(),
+        )
+    }
+
+    fun configureFirewall(serverId: String) {
+        startServerOperation(
+            serverId = serverId,
+            kind = ServerOperationKind.CONFIGURE_FIREWALL,
+            arguments = listOfNotNull(
+                mutableState.value.servers.firstOrNull { it.id == serverId }?.sshPort?.toString(),
+            ),
+        )
+    }
+
+    fun obtainTlsCertificate(serverId: String) {
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        val addressType = if (server.enteredAddress == server.frozenIpv4) "ip" else "domain"
+        startServerOperation(
+            serverId = serverId,
+            kind = ServerOperationKind.OBTAIN_TLS_CERTIFICATE,
+            arguments = listOf(addressType, server.enteredAddress),
+        )
+    }
+
+    fun prepareTiniTalk(serverId: String) {
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        startServerOperation(
+            serverId = serverId,
+            kind = ServerOperationKind.PREPARE_TINITALK,
+            arguments = listOf(server.enteredAddress),
+        )
+    }
+
+    fun openTiniTalkFiles() {
+        if (mutableState.value.serverOperation != null) return
+        clearSelectedTiniTalkFiles()
+        mutableState.update { it.copy(tinitalkFiles = TiniTalkFilesState(visible = true)) }
+    }
+
+    fun closeTiniTalkFiles() {
+        clearSelectedTiniTalkFiles()
+        mutableState.update { it.copy(tinitalkFiles = TiniTalkFilesState()) }
+    }
+
+    fun tinitalkBinarySelected(uri: Uri?) {
+        if (uri == null || !mutableState.value.tinitalkFiles.visible) return
+        selectedTiniTalkBinaryUri = uri
+        mutableState.update {
+            it.copy(tinitalkFiles = it.tinitalkFiles.copy(binaryName = displayName(uri)))
+        }
+    }
+
+    fun firebaseAndroidConfigSelected(uri: Uri?) {
+        if (uri == null || !mutableState.value.tinitalkFiles.visible) return
+        selectedFirebaseAndroidConfigUri = uri
+        mutableState.update {
+            it.copy(
+                tinitalkFiles = it.tinitalkFiles.copy(
+                    firebaseAndroidConfigName = displayName(uri),
+                ),
+            )
+        }
+    }
+
+    fun firebaseServiceAccountSelected(uri: Uri?) {
+        if (uri == null || !mutableState.value.tinitalkFiles.visible) return
+        selectedFirebaseServiceAccountUri = uri
+        mutableState.update {
+            it.copy(
+                tinitalkFiles = it.tinitalkFiles.copy(
+                    firebaseServiceAccountName = displayName(uri),
+                ),
+            )
+        }
+    }
+
+    fun installTiniTalkFiles(serverId: String) {
+        val binary = selectedTiniTalkBinaryUri ?: return
+        val androidConfig = selectedFirebaseAndroidConfigUri ?: return
+        val serviceAccount = selectedFirebaseServiceAccountUri ?: return
+        val uploads = listOf(
+            LocalOperationUpload(binary, "tinitalk"),
+            LocalOperationUpload(androidConfig, "google-services.json"),
+            LocalOperationUpload(serviceAccount, "firebase-service-account.json"),
+        )
+        clearSelectedTiniTalkFiles()
+        mutableState.update { it.copy(tinitalkFiles = TiniTalkFilesState()) }
+        startServerOperation(
+            serverId = serverId,
+            kind = ServerOperationKind.INSTALL_TINITALK_FILES,
+            arguments = emptyList(),
+            localUploads = uploads,
+        )
+    }
+
+    fun startTiniTalk(serverId: String) {
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        startServerOperation(
+            serverId = serverId,
+            kind = ServerOperationKind.START_TINITALK,
+            arguments = listOf(server.enteredAddress, server.frozenIpv4),
+        )
+    }
+
+    private fun startServerOperation(
+        serverId: String,
+        kind: ServerOperationKind,
+        arguments: List<String>,
+        localUploads: List<LocalOperationUpload> = emptyList(),
+    ) {
+        if (serverOperationJob?.isActive == true) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        mutableState.update {
+            it.copy(
+                serverOperation = RunningServerOperation(
+                    serverId = serverId,
+                    kind = kind,
+                    startedAt = SystemClock.elapsedRealtime(),
+                ),
+                notice = null,
+            )
+        }
+        serverOperationJob = viewModelScope.launch {
+            var uploads = emptyList<RemoteOperationUpload>()
+            try {
+                uploads = withContext(Dispatchers.IO) {
+                    localUploads.map { upload ->
+                        val bytes = contentResolver.openInputStream(upload.uri)?.use { it.readBytes() }
+                            ?: error("Failed to open selected file")
+                        check(bytes.isNotEmpty()) { "Selected file is empty" }
+                        RemoteOperationUpload(upload.remoteName, bytes)
+                    }
+                }
+                val connection = connectToServer(server)
+                try {
+                    val remote = remoteOperationRunner.start(
+                        connection = connection,
+                        login = server.sshLogin,
+                        kind = kind,
+                        arguments = arguments,
+                        uploads = uploads,
+                    )
+                    monitorServerOperation(connection, server, remote)
+                } finally {
+                    runCatching { connection.close() }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutableState.update {
+                    it.copy(
+                        serverOperation = null,
+                        notice = serverOperationErrorMessage(error),
+                    )
+                }
+            } finally {
+                uploads.forEach { it.bytes.fill(0) }
+                serverOperationJob = null
+            }
+        }
+    }
+
+    private fun displayName(uri: Uri): String = runCatching {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()?.takeIf(String::isNotBlank) ?: "Выбранный файл"
+
+    private fun clearSelectedTiniTalkFiles() {
+        selectedTiniTalkBinaryUri = null
+        selectedFirebaseAndroidConfigUri = null
+        selectedFirebaseServiceAccountUri = null
+    }
+
+    private fun discoverServerOperation(serverId: String) {
+        if (serverOperationJob?.isActive == true || mutableState.value.serverOperation != null) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        serverOperationJob = viewModelScope.launch {
+            try {
+                val connection = connectToServer(server)
+                try {
+                    remoteOperationRunner.find(connection, server.sshLogin)?.let { remote ->
+                        monitorServerOperation(connection, server, remote)
+                    }
+                } finally {
+                    runCatching { connection.close() }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Status actions still work if no recoverable operation can be read.
+            } finally {
+                serverOperationJob = null
+            }
+        }
+    }
+
+    private suspend fun monitorServerOperation(
+        connection: SshConnection,
+        server: ServerRecord,
+        initial: RemoteServerOperation,
+    ) {
+        var remote = initial
+        while (remote.state == RemoteOperationState.RUNNING) {
+            mutableState.update {
+                it.copy(
+                    serverOperation = RunningServerOperation(
+                        serverId = server.id,
+                        kind = remote.kind,
+                        startedAt = SystemClock.elapsedRealtime() - remote.elapsedMillis,
+                    ),
+                )
+            }
+            delay(REMOTE_OPERATION_POLL_MILLIS)
+            remote = remoteOperationRunner.status(connection, server.sshLogin, remote.kind)
+                ?: error("Remote operation disappeared")
+        }
+
+        remoteOperationRunner.acknowledge(connection, server.sshLogin, remote.kind)
+        mutableState.update {
+            it.copy(
+                serverOperation = null,
+                notice = if (remote.state == RemoteOperationState.SUCCEEDED) {
+                    remote.kind.successMessage()
+                } else {
+                    remote.kind.failureMessage()
+                },
+            )
+        }
     }
 
     fun renameServer(serverId: String, value: String) {
@@ -238,22 +566,7 @@ class AdminViewModel(
     }
 
     private suspend fun runSshCheck(server: ServerRecord): SshCheckResult {
-        val endpoint = ResolvedEndpoint(
-            enteredAddress = server.enteredAddress,
-            sshPort = server.sshPort,
-            frozenIpv4 = server.frozenIpv4,
-            addressKind = if (server.enteredAddress == server.frozenIpv4) {
-                AddressKind.IPV4
-            } else {
-                AddressKind.DNS
-            },
-        )
-        val connection = sshAccessChecker.connect(
-            endpoint = endpoint,
-            login = server.sshLogin,
-            credential = SshCredential.ManagedKey(server.keystoreAlias),
-            pinnedHostKey = server.hostKey,
-        )
+        val connection = connectToServer(server)
         val command = try {
             connection.exec(SSH_CHECK_COMMAND)
         } finally {
@@ -265,11 +578,53 @@ class AdminViewModel(
         return SshCheckResult(user = lines[0], host = lines[1], uptime = lines[2])
     }
 
+    private suspend fun runTiniTalkStatusCheck(server: ServerRecord): TiniTalkStatus {
+        val connection = connectToServer(server)
+        return try {
+            tinitalkStatusChecker.check(connection)
+        } finally {
+            runCatching { connection.close() }
+        }
+    }
+
+    private suspend fun connectToServer(server: ServerRecord): SshConnection {
+        val endpoint = ResolvedEndpoint(
+            enteredAddress = server.enteredAddress,
+            sshPort = server.sshPort,
+            frozenIpv4 = server.frozenIpv4,
+            addressKind = if (server.enteredAddress == server.frozenIpv4) {
+                AddressKind.IPV4
+            } else {
+                AddressKind.DNS
+            },
+        )
+        return sshAccessChecker.connect(
+            endpoint = endpoint,
+            login = server.sshLogin,
+            credential = SshCredential.ManagedKey(server.keystoreAlias),
+            pinnedHostKey = server.hostKey,
+        )
+    }
+
     private fun sshCheckErrorMessage(error: Exception): String = when (error) {
         is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
         is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
         is SshFailure.Timeout -> "Сервер не ответил вовремя"
         else -> "Не удалось проверить SSH-доступ"
+    }
+
+    private fun tinitalkStatusErrorMessage(error: Exception): String = when (error) {
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        else -> "Не удалось получить статус TiniTalk"
+    }
+
+    private fun serverOperationErrorMessage(error: Exception): String = when (error) {
+        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Операция не завершилась вовремя"
+        else -> "Не удалось выполнить операцию; она может продолжаться на сервере"
     }
 
     fun updateDisplayName(value: String) = updateAddServerForm { copy(displayName = value) }
@@ -661,9 +1016,15 @@ class AdminViewModel(
         val sshLogin: String,
     )
 
+    private data class LocalOperationUpload(
+        val uri: Uri,
+        val remoteName: String,
+    )
+
     companion object {
         private const val SSH_CHECK_COMMAND =
             "LC_ALL=C; export LC_ALL; id -un && hostname && uptime -p"
+        private const val REMOTE_OPERATION_POLL_MILLIS = 1_000L
 
         fun factory(context: Context): ViewModelProvider.Factory {
             val applicationContext = context.applicationContext
@@ -674,6 +1035,7 @@ class AdminViewModel(
                     val identityStore = AndroidKeystoreSshIdentityStore(applicationContext)
                     val sshAccessChecker = SshjAccessChecker(identityStore)
                     return AdminViewModel(
+                        contentResolver = applicationContext.contentResolver,
                         serverStore = SharedPreferencesServerStore(applicationContext),
                         endpointResolver = EndpointResolver(),
                         sshAccessChecker = sshAccessChecker,
@@ -684,11 +1046,31 @@ class AdminViewModel(
                             identityStore = identityStore,
                             installer = AuthorizedKeyInstaller(applicationContext),
                         ),
+                        tinitalkStatusChecker = TiniTalkStatusChecker(applicationContext),
+                        remoteOperationRunner = RemoteServerOperationRunner(applicationContext),
                     ) as T
                 }
             }
         }
     }
+}
+
+private fun ServerOperationKind.successMessage(): String = when (this) {
+    ServerOperationKind.INSTALL_SYSTEM_PACKAGES -> "Системные пакеты установлены"
+    ServerOperationKind.CONFIGURE_FIREWALL -> "Firewall настроен"
+    ServerOperationKind.OBTAIN_TLS_CERTIFICATE -> "TLS-сертификат получен"
+    ServerOperationKind.PREPARE_TINITALK -> "TiniTalk подготовлен"
+    ServerOperationKind.INSTALL_TINITALK_FILES -> "Файлы TiniTalk загружены"
+    ServerOperationKind.START_TINITALK -> "TiniTalk запущен"
+}
+
+private fun ServerOperationKind.failureMessage(): String = when (this) {
+    ServerOperationKind.INSTALL_SYSTEM_PACKAGES -> "Не удалось установить системные пакеты"
+    ServerOperationKind.CONFIGURE_FIREWALL -> "Не удалось настроить firewall"
+    ServerOperationKind.OBTAIN_TLS_CERTIFICATE -> "Не удалось получить TLS-сертификат"
+    ServerOperationKind.PREPARE_TINITALK -> "Не удалось подготовить TiniTalk"
+    ServerOperationKind.INSTALL_TINITALK_FILES -> "Не удалось загрузить файлы TiniTalk"
+    ServerOperationKind.START_TINITALK -> "Не удалось запустить TiniTalk"
 }
 
 private class KnownHostKeyChangedException : IllegalStateException()

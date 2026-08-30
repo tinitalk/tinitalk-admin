@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalAutofillManager
+import org.tinitalk.admin.server.ServerOperationKind
 
 @Composable
 fun AdminApp(viewModel: AdminViewModel) {
@@ -30,6 +31,18 @@ fun AdminApp(viewModel: AdminViewModel) {
     val privateKeyPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = viewModel::privateKeySelected,
+    )
+    val tinitalkBinaryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = viewModel::tinitalkBinarySelected,
+    )
+    val firebaseAndroidConfigPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = viewModel::firebaseAndroidConfigSelected,
+    )
+    val firebaseServiceAccountPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = viewModel::firebaseServiceAccountSelected,
     )
 
     LaunchedEffect(state.notice) {
@@ -78,16 +91,64 @@ fun AdminApp(viewModel: AdminViewModel) {
         is AdminRoute.ServerDetails -> state.servers
             .firstOrNull { it.id == route.serverId }
             ?.let { server ->
+                val runningOperation = state.serverOperation
                 ServerDetailsScreen(
                     server = server,
                     snackbarHostState = snackbarHostState,
                     sshCheckInProgress = state.sshCheckInProgress,
                     sshCheckResult = state.sshCheckResult,
+                    tinitalkStatusInProgress = state.tinitalkStatusInProgress,
+                    tinitalkStatusResult = state.tinitalkStatusResult,
+                    systemPackagesInstallInProgress =
+                        runningOperation?.serverId == server.id &&
+                            runningOperation.kind == ServerOperationKind.INSTALL_SYSTEM_PACKAGES,
+                    firewallConfigureInProgress =
+                        runningOperation?.serverId == server.id &&
+                            runningOperation.kind == ServerOperationKind.CONFIGURE_FIREWALL,
+                    tlsCertificateInProgress =
+                        runningOperation?.serverId == server.id &&
+                            runningOperation.kind == ServerOperationKind.OBTAIN_TLS_CERTIFICATE,
+                    tinitalkPrepareInProgress =
+                        runningOperation?.serverId == server.id &&
+                            runningOperation.kind == ServerOperationKind.PREPARE_TINITALK,
+                    tinitalkFilesInstallInProgress =
+                        runningOperation?.serverId == server.id &&
+                            runningOperation.kind == ServerOperationKind.INSTALL_TINITALK_FILES,
+                    tinitalkStartInProgress =
+                        runningOperation?.serverId == server.id &&
+                            runningOperation.kind == ServerOperationKind.START_TINITALK,
+                    tinitalkFiles = state.tinitalkFiles,
+                    serverOperationStartedAt = runningOperation?.startedAt
+                        ?.takeIf { runningOperation.serverId == server.id },
+                    serverOperationInProgress = runningOperation != null,
                     onBack = viewModel::closeServer,
                     onRename = { viewModel.renameServer(server.id, it) },
                     onRemove = { viewModel.removeServer(server.id) },
                     onCheckSsh = { viewModel.checkServerSsh(server.id) },
                     onDismissSshCheckResult = viewModel::dismissSshCheckResult,
+                    onCheckTiniTalkStatus = { viewModel.checkTiniTalkStatus(server.id) },
+                    onDismissTiniTalkStatus = viewModel::dismissTiniTalkStatus,
+                    onInstallSystemPackages = { viewModel.installSystemPackages(server.id) },
+                    onConfigureFirewall = { viewModel.configureFirewall(server.id) },
+                    onObtainTlsCertificate = { viewModel.obtainTlsCertificate(server.id) },
+                    onPrepareTiniTalk = { viewModel.prepareTiniTalk(server.id) },
+                    onOpenTiniTalkFiles = viewModel::openTiniTalkFiles,
+                    onCloseTiniTalkFiles = viewModel::closeTiniTalkFiles,
+                    onChooseTiniTalkBinary = {
+                        tinitalkBinaryPicker.launch(arrayOf("application/octet-stream", "*/*"))
+                    },
+                    onChooseFirebaseAndroidConfig = {
+                        firebaseAndroidConfigPicker.launch(
+                            arrayOf("application/json", "text/plain", "*/*"),
+                        )
+                    },
+                    onChooseFirebaseServiceAccount = {
+                        firebaseServiceAccountPicker.launch(
+                            arrayOf("application/json", "text/plain", "*/*"),
+                        )
+                    },
+                    onInstallTiniTalkFiles = { viewModel.installTiniTalkFiles(server.id) },
+                    onStartTiniTalk = { viewModel.startTiniTalk(server.id) },
                     modifier = Modifier.fillMaxSize().systemBarsPadding(),
                 )
             }

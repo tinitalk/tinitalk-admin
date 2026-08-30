@@ -52,8 +52,17 @@ data class SshCommandResult(
 )
 
 interface SshConnection : Closeable {
-    suspend fun exec(command: String): SshCommandResult
-    suspend fun upload(bytes: ByteArray, remotePath: String, mode: Int)
+    suspend fun exec(
+        command: String,
+        stdin: ByteArray? = null,
+        timeoutMillis: Long? = null,
+    ): SshCommandResult
+    suspend fun upload(
+        bytes: ByteArray,
+        remotePath: String,
+        mode: Int,
+        timeoutMillis: Long? = null,
+    )
 }
 
 interface SshAccessChecker {
@@ -182,11 +191,16 @@ class SshjAccessChecker(
 
 private class SshjConnection(
     private val client: SSHClient,
-    private val timeoutMillis: Long,
+    private val defaultTimeoutMillis: Long,
     private val maxOutputBytes: Int,
 ) : SshConnection {
-    override suspend fun exec(command: String): SshCommandResult = try {
-        withTimeout(timeoutMillis) {
+    override suspend fun exec(
+        command: String,
+        stdin: ByteArray?,
+        timeoutMillis: Long?,
+    ): SshCommandResult = try {
+        val effectiveTimeoutMillis = timeoutMillis ?: defaultTimeoutMillis
+        withTimeout(effectiveTimeoutMillis) {
             val session = runInterruptible(Dispatchers.IO) { client.startSession() }
             val running = try {
                 runInterruptible(Dispatchers.IO) { session.exec(command) }
@@ -195,6 +209,11 @@ private class SshjConnection(
                 throw error
             }
             try {
+                stdin?.let { bytes ->
+                    runInterruptible(Dispatchers.IO) {
+                        running.outputStream.use { it.write(bytes) }
+                    }
+                }
                 coroutineScope {
                     val stdout = async(Dispatchers.IO) {
                         runInterruptible { running.inputStream.readBounded(maxOutputBytes) }
@@ -203,7 +222,7 @@ private class SshjConnection(
                         runInterruptible { running.errorStream.readBounded(maxOutputBytes) }
                     }
                     val exitCode = runInterruptible(Dispatchers.IO) {
-                        running.join(timeoutMillis, TimeUnit.MILLISECONDS)
+                        running.join(effectiveTimeoutMillis, TimeUnit.MILLISECONDS)
                         running.exitStatus
                     } ?: throw SshFailure.Timeout()
                     SshCommandResult(exitCode, stdout.await(), stderr.await())
@@ -218,9 +237,14 @@ private class SshjConnection(
         throw error.asConnectionFailure()
     }
 
-    override suspend fun upload(bytes: ByteArray, remotePath: String, mode: Int) {
+    override suspend fun upload(
+        bytes: ByteArray,
+        remotePath: String,
+        mode: Int,
+        timeoutMillis: Long?,
+    ) {
         try {
-            withTimeout(timeoutMillis) {
+            withTimeout(timeoutMillis ?: defaultTimeoutMillis) {
                 runInterruptible(Dispatchers.IO) {
                     client.newSFTPClient().use { sftp ->
                         sftp.put(ByteArraySourceFile(bytes, remotePath.substringAfterLast('/')), remotePath)

@@ -13,8 +13,15 @@ class InitialSetupTest {
     }
 
     @Test
-    fun classifiesWorkingInstallationAsConfiguredRegardlessOfInstaller() {
+    fun classifiesServerAsConfiguredOnlyWhenEverySetupStepIsReady() {
         val configured = InitialSetupEvidence(
+            systemPackagesReady = true,
+            firewallReady = true,
+            fail2banReady = true,
+            tlsCertificateReady = true,
+            tinitalkPrepared = true,
+            binaryUploaded = true,
+            tinitalkStarted = true,
             doctorReady = true,
             binaryInstalled = true,
             userPresent = true,
@@ -26,6 +33,10 @@ class InitialSetupTest {
             serviceRunning = true,
         )
         assertEquals(ServerSetupAssessment.CONFIGURED, configured.assessment())
+        assertEquals(
+            ServerSetupAssessment.PARTIAL,
+            configured.copy(fail2banReady = false).assessment(),
+        )
         assertEquals(
             ServerSetupAssessment.PARTIAL,
             configured.copy(serviceRunning = false).assessment(),
@@ -42,6 +53,7 @@ class InitialSetupTest {
             listOf(
                 InitialSetupStep.SYSTEM_PACKAGES,
                 InitialSetupStep.FIREWALL,
+                InitialSetupStep.FAIL2BAN,
                 InitialSetupStep.TLS_CERTIFICATE,
             ),
             InitialSetupStep.PREPARE_TINITALK.completedSteps(),

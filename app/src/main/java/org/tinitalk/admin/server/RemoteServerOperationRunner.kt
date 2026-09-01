@@ -20,6 +20,11 @@ enum class ServerOperationKind(
         scriptName = "configure_firewall.sh",
         timeout = "2min",
     ),
+    SETUP_FAIL2BAN(
+        unitName = "tinitalk-admin-setup-fail2ban.service",
+        scriptName = "setup_fail2ban.sh",
+        timeout = "5min",
+    ),
     OBTAIN_TLS_CERTIFICATE(
         unitName = "tinitalk-admin-obtain-tls-certificate.service",
         scriptName = "obtain_tls_certificate.sh",

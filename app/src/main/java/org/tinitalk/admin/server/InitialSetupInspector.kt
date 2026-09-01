@@ -35,6 +35,7 @@ class InitialSetupInspector(context: Context) {
         return InitialSetupEvidence(
             systemPackagesReady = values.yes("system_packages"),
             firewallReady = values.yes("firewall"),
+            fail2banReady = values.yes("fail2ban"),
             tlsCertificateReady = values.yes("tls_certificate"),
             tinitalkPrepared = values.yes("prepare_tinitalk"),
             binaryUploaded = values.yes("upload_binary"),
@@ -70,6 +71,7 @@ class InitialSetupInspector(context: Context) {
         val EXPECTED_FIELDS = setOf(
             "system_packages",
             "firewall",
+            "fail2ban",
             "tls_certificate",
             "prepare_tinitalk",
             "upload_binary",

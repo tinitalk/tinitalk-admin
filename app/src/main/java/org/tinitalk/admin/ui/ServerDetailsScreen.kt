@@ -855,6 +855,7 @@ private fun Long.asElapsedTime(): String {
 private fun InitialSetupStep.displayName(): String = when (this) {
     InitialSetupStep.SYSTEM_PACKAGES -> "Системные пакеты"
     InitialSetupStep.FIREWALL -> "Firewall"
+    InitialSetupStep.FAIL2BAN -> "Fail2ban"
     InitialSetupStep.TLS_CERTIFICATE -> "TLS-сертификат"
     InitialSetupStep.PREPARE_TINITALK -> "Подготовка TiniTalk"
     InitialSetupStep.UPLOAD_BINARY -> "Загрузка бинарника"

@@ -46,6 +46,13 @@ firewall_ready() {
             '
 }
 
+fail2ban_ready() {
+    command -v fail2ban-client >/dev/null 2>&1 &&
+        systemctl is-active --quiet fail2ban &&
+        grep -qx "port = $ssh_port" /etc/fail2ban/jail.d/tinitalk-admin.local &&
+        fail2ban-client status sshd >/dev/null 2>&1
+}
+
 certificate_ready() {
     [ -s "/etc/letsencrypt/live/$server_address/fullchain.pem" ] &&
         [ -s "/etc/letsencrypt/live/$server_address/privkey.pem" ]
@@ -84,6 +91,7 @@ doctor_ready() {
 
 print_status system_packages system_packages_ready
 print_status firewall firewall_ready
+print_status fail2ban fail2ban_ready
 print_status tls_certificate certificate_ready
 print_status prepare_tinitalk prepare_ready
 print_status upload_binary binary_ready

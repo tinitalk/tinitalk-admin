@@ -9,6 +9,7 @@ enum class ServerSetupAssessment {
 enum class InitialSetupStep(val operationKind: ServerOperationKind) {
     SYSTEM_PACKAGES(ServerOperationKind.INSTALL_SYSTEM_PACKAGES),
     FIREWALL(ServerOperationKind.CONFIGURE_FIREWALL),
+    FAIL2BAN(ServerOperationKind.SETUP_FAIL2BAN),
     TLS_CERTIFICATE(ServerOperationKind.OBTAIN_TLS_CERTIFICATE),
     PREPARE_TINITALK(ServerOperationKind.PREPARE_TINITALK),
     UPLOAD_BINARY(ServerOperationKind.INSTALL_TINITALK_BINARY),
@@ -29,6 +30,7 @@ enum class InitialSetupStep(val operationKind: ServerOperationKind) {
 data class InitialSetupEvidence(
     val systemPackagesReady: Boolean = false,
     val firewallReady: Boolean = false,
+    val fail2banReady: Boolean = false,
     val tlsCertificateReady: Boolean = false,
     val tinitalkPrepared: Boolean = false,
     val binaryUploaded: Boolean = false,
@@ -46,6 +48,7 @@ data class InitialSetupEvidence(
     fun completedSteps(): Set<InitialSetupStep> = buildSet {
         if (systemPackagesReady) add(InitialSetupStep.SYSTEM_PACKAGES)
         if (firewallReady) add(InitialSetupStep.FIREWALL)
+        if (fail2banReady) add(InitialSetupStep.FAIL2BAN)
         if (tlsCertificateReady) add(InitialSetupStep.TLS_CERTIFICATE)
         if (tinitalkPrepared) add(InitialSetupStep.PREPARE_TINITALK)
         if (binaryUploaded) add(InitialSetupStep.UPLOAD_BINARY)
@@ -53,7 +56,8 @@ data class InitialSetupEvidence(
     }
 
     fun assessment(): ServerSetupAssessment = when {
-        doctorReady &&
+        completedSteps().size == InitialSetupStep.entries.size &&
+            doctorReady &&
             binaryInstalled &&
             userPresent &&
             dataDirectoryPresent &&

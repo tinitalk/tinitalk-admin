@@ -1452,6 +1452,7 @@ class AdminViewModel(
     private fun setupArguments(server: ServerRecord, step: InitialSetupStep): List<String> = when (step) {
         InitialSetupStep.SYSTEM_PACKAGES -> emptyList()
         InitialSetupStep.FIREWALL -> listOf(server.sshPort.toString())
+        InitialSetupStep.FAIL2BAN -> listOf(server.sshPort.toString())
         InitialSetupStep.TLS_CERTIFICATE -> listOf(
             if (server.enteredAddress == server.frozenIpv4) "ip" else "domain",
             server.enteredAddress,
@@ -2094,6 +2095,7 @@ class AdminViewModel(
 private fun ServerOperationKind.failureMessage(): String = when (this) {
     ServerOperationKind.INSTALL_SYSTEM_PACKAGES -> "Не удалось установить системные пакеты"
     ServerOperationKind.CONFIGURE_FIREWALL -> "Не удалось настроить firewall"
+    ServerOperationKind.SETUP_FAIL2BAN -> "Не удалось настроить Fail2ban"
     ServerOperationKind.OBTAIN_TLS_CERTIFICATE -> "Не удалось получить TLS-сертификат"
     ServerOperationKind.PREPARE_TINITALK -> "Не удалось подготовить TiniTalk"
     ServerOperationKind.INSTALL_TINITALK_BINARY -> "Не удалось загрузить бинарник TiniTalk"

@@ -33,7 +33,7 @@ case "$address_type" in
         ;;
 esac
 
-# Copy renewed certificates to TiniTalk and restart the service.
+# Copy renewed certificates to TiniTalk.
 install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
 cat > /etc/letsencrypt/renewal-hooks/deploy/tinitalk <<'EOF'
 #!/bin/sh
@@ -49,10 +49,6 @@ install -m 0644 -o tinitalk -g tinitalk \
 install -m 0600 -o tinitalk -g tinitalk \
     "$RENEWED_LINEAGE/privkey.pem" \
     /var/lib/tinitalk/tls/privkey.pem
-
-if systemctl is-active --quiet tinitalk.service; then
-    systemctl restart tinitalk.service
-fi
 EOF
 
 chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/tinitalk

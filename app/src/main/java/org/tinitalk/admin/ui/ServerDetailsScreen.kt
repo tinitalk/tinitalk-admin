@@ -73,6 +73,7 @@ fun ServerDetailsScreen(
     onCheckConnectivity: () -> Unit,
     onDismissConnectivity: () -> Unit,
     onCheckInitialSetup: () -> Unit,
+    onRetryChangedHostKey: () -> Unit,
     onOpenUsers: () -> Unit,
     onCheckAndContinueInitialSetup: () -> Unit,
     onContinueInitialSetup: () -> Unit,
@@ -96,7 +97,11 @@ fun ServerDetailsScreen(
     }
     val setupBusy = initialSetup.mode == InitialSetupUiMode.CHECKING ||
         initialSetup.mode == InitialSetupUiMode.RUNNING
-    val actionsEnabled = !serverConnectivity.inProgress && !serverOperationInProgress && !setupBusy
+    val hostKeyChanged = initialSetup.mode == InitialSetupUiMode.SSH_HOST_KEY_CHANGED
+    val actionsEnabled = !serverConnectivity.inProgress &&
+        !serverOperationInProgress &&
+        !setupBusy &&
+        !hostKeyChanged
 
     LaunchedEffect(renameDialogVisible) {
         if (renameDialogVisible) {
@@ -209,11 +214,13 @@ fun ServerDetailsScreen(
                             value = server.enteredAddress,
                             modifier = Modifier.weight(1f),
                         )
-                        ServerCheckIconButton(
-                            inProgress = serverConnectivity.inProgress,
-                            enabled = actionsEnabled,
-                            onClick = onCheckConnectivity,
-                        )
+                        if (!hostKeyChanged) {
+                            ServerCheckIconButton(
+                                inProgress = serverConnectivity.inProgress,
+                                enabled = actionsEnabled,
+                                onClick = onCheckConnectivity,
+                            )
+                        }
                     }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(18.dp),
@@ -237,10 +244,12 @@ fun ServerDetailsScreen(
                 setupElapsedSeconds = setupElapsedSeconds,
                 stepElapsedSeconds = serverOperationElapsedSeconds,
                 onCheck = onCheckInitialSetup,
+                onRetryChangedHostKey = onRetryChangedHostKey,
                 onCheckAndStart = onCheckAndContinueInitialSetup,
                 onStart = onContinueInitialSetup,
                 onRetry = onRetryInitialSetup,
                 actionsEnabled = actionsEnabled,
+                expectedFingerprint = server.hostKey.sha256Fingerprint,
             )
             if (initialSetup.mode == InitialSetupUiMode.CONFIGURED) {
                 SetupActionButton(
@@ -513,10 +522,12 @@ private fun InitialSetupCard(
     setupElapsedSeconds: Long,
     stepElapsedSeconds: Long,
     onCheck: () -> Unit,
+    onRetryChangedHostKey: () -> Unit,
     onCheckAndStart: () -> Unit,
     onStart: () -> Unit,
     onRetry: () -> Unit,
     actionsEnabled: Boolean,
+    expectedFingerprint: String,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -614,6 +625,37 @@ private fun InitialSetupCard(
                             onClick = onCheck,
                         )
                     }
+                }
+
+                InitialSetupUiMode.SSH_HOST_KEY_CHANGED -> {
+                    Text(
+                        "SSH fingerprint изменился",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    ServerProperty("Сохранённый fingerprint", expectedFingerprint)
+                    ServerProperty(
+                        "Новый fingerprint",
+                        state.observedFingerprint ?: "Неизвестен",
+                    )
+                    if (state.hostKeyCheckInProgress) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text("Проверяем SSH fingerprint…")
+                        }
+                    }
+                    SetupActionButton(
+                        "Проверить повторно",
+                        !state.hostKeyCheckInProgress,
+                        onRetryChangedHostKey,
+                    )
                 }
             }
         }

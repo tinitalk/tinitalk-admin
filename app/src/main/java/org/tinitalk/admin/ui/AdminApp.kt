@@ -133,6 +133,9 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 onCheckInitialSetup = {
                                     viewModel.checkInitialSetup(server.id)
                                 },
+                                onRetryChangedHostKey = {
+                                    viewModel.retryChangedHostKey(server.id)
+                                },
                                 onOpenUsers = {
                                     viewModel.openServerUsers(server.id)
                                 },

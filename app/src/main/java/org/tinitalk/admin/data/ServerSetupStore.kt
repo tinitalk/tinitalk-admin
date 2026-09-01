@@ -5,6 +5,10 @@ import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import org.tinitalk.admin.server.InitialSetupStep
 
+enum class StoredServerSetupStatus {
+    SSH_HOST_KEY_CHANGED,
+}
+
 data class StoredServerSetup(
     @SerializedName("configured") val configured: Boolean,
     @SerializedName("startedAtEpochMillis") val startedAtEpochMillis: Long? = null,
@@ -12,12 +16,17 @@ data class StoredServerSetup(
     @SerializedName("operationStarted") val operationStarted: Boolean = false,
     @SerializedName("completedSteps") val completedSteps: Set<InitialSetupStep>? = null,
     @SerializedName("binaryUri") val binaryUri: String? = null,
+    @SerializedName("status") val status: StoredServerSetupStatus? = null,
+    @SerializedName("observedFingerprint") val observedFingerprint: String? = null,
 ) {
     val inProgress: Boolean
         get() = !configured && startedAtEpochMillis != null && currentStep != null
 
     val completedStepSet: Set<InitialSetupStep>
         get() = completedSteps.orEmpty()
+
+    val hostKeyChanged: Boolean
+        get() = status == StoredServerSetupStatus.SSH_HOST_KEY_CHANGED
 }
 
 interface ServerSetupStore {
@@ -36,7 +45,7 @@ class SharedPreferencesServerSetupStore(
         val raw = preferences.getString(serverId, null) ?: return null
         return runCatching { gson.fromJson(raw, StoredServerSetup::class.java) }
             .getOrNull()
-            ?.takeIf { it.configured || it.inProgress }
+            ?.takeIf { it.configured || it.inProgress || it.hostKeyChanged }
     }
 
     override fun put(serverId: String, setup: StoredServerSetup) {

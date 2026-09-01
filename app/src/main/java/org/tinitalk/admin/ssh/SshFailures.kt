@@ -1,10 +1,14 @@
 package org.tinitalk.admin.ssh
 
+import org.tinitalk.admin.model.PinnedHostKey
+
 sealed class SshFailure(
     message: String,
     cause: Throwable? = null,
 ) : Exception(message, cause) {
-    class HostKeyChanged : SshFailure("SSH host key changed")
+    class HostKeyChanged(
+        val observedHostKey: PinnedHostKey,
+    ) : SshFailure("SSH host key changed")
     class AuthenticationFailed : SshFailure("SSH authentication failed")
     class Timeout : SshFailure("SSH operation timed out")
     class OutputTooLarge : SshFailure("SSH command output is too large")

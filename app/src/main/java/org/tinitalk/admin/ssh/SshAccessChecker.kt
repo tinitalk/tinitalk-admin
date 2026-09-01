@@ -83,7 +83,7 @@ class SshjAccessChecker(
 ) : SshAccessChecker {
     override suspend fun scanHostKey(endpoint: ResolvedEndpoint): PinnedHostKey {
         val capture = CapturingHostKeyVerifier()
-        return useClient(hostKeyRejected = { false }) { client ->
+        return useClient(rejectedHostKey = { null }) { client ->
             client.addHostKeyVerifier(capture)
             connectToPinnedAddress(client, endpoint)
             capture.observed ?: error("SSH server did not present a host key")
@@ -123,14 +123,14 @@ class SshjAccessChecker(
             return SshjConnection(client, operationTimeoutMillis, maxOutputBytes)
         } catch (error: Throwable) {
             if (error is CancellationException && error !is TimeoutCancellationException) throw error
-            throw mapFailure(error, verifier.rejected)
+            throw mapFailure(error, verifier.rejectedHostKey)
         } finally {
             if (!connected) client.closeIgnoringFailure()
         }
     }
 
     private suspend fun <T> useClient(
-        hostKeyRejected: () -> Boolean,
+        rejectedHostKey: () -> PinnedHostKey?,
         block: (SSHClient) -> T,
     ): T {
         val client = newClient()
@@ -138,7 +138,7 @@ class SshjAccessChecker(
             bounded { block(client) }
         } catch (error: Throwable) {
             if (error is CancellationException && error !is TimeoutCancellationException) throw error
-            throw mapFailure(error, hostKeyRejected())
+            throw mapFailure(error, rejectedHostKey())
         } finally {
             client.closeIgnoringFailure()
         }
@@ -153,9 +153,9 @@ class SshjAccessChecker(
         runInterruptible(Dispatchers.IO) { block() }
     }
 
-    private fun mapFailure(error: Throwable, hostKeyRejected: Boolean): SshFailure = when {
+    private fun mapFailure(error: Throwable, rejectedHostKey: PinnedHostKey?): SshFailure = when {
         error is SshFailure -> error
-        hostKeyRejected -> SshFailure.HostKeyChanged()
+        rejectedHostKey != null -> SshFailure.HostKeyChanged(rejectedHostKey)
         error is TimeoutCancellationException ||
             error is InterruptedException ||
             error is SocketTimeoutException ||

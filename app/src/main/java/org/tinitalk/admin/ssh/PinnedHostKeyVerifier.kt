@@ -12,7 +12,7 @@ class PinnedHostKeyVerifier(
     private val expectedAlgorithm = expected.algorithm.toByteArray(Charsets.UTF_8)
     private val expectedWire = Base64.getDecoder().decode(expected.sshWireKeyBase64)
 
-    var rejected: Boolean = false
+    var rejectedHostKey: PinnedHostKey? = null
         private set
 
     fun accept(algorithm: String, wire: ByteArray): Boolean {
@@ -30,7 +30,7 @@ class PinnedHostKeyVerifier(
             observed.algorithm,
             Base64.getDecoder().decode(observed.sshWireKeyBase64),
         )
-        rejected = !accepted
+        rejectedHostKey = observed.takeUnless { accepted }
         return accepted
     }
 

@@ -14,6 +14,7 @@ import org.tinitalk.admin.data.ServerSetupStore
 import org.tinitalk.admin.data.SharedPreferencesServerStore
 import org.tinitalk.admin.data.SharedPreferencesServerSetupStore
 import org.tinitalk.admin.data.StoredServerSetup
+import org.tinitalk.admin.data.StoredServerSetupStatus
 import org.tinitalk.admin.model.PinnedHostKey
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.server.DnsValidationException
@@ -160,6 +161,7 @@ enum class InitialSetupUiMode {
     RUNNING,
     FAILED,
     CONFIGURED,
+    SSH_HOST_KEY_CHANGED,
 }
 
 data class InitialSetupUiState(
@@ -168,6 +170,8 @@ data class InitialSetupUiState(
     val currentStep: InitialSetupStep? = null,
     val completedSteps: Set<InitialSetupStep> = emptySet(),
     val errorMessage: String? = null,
+    val observedFingerprint: String? = null,
+    val hostKeyCheckInProgress: Boolean = false,
 )
 
 private enum class InitialSetupContinuation {
@@ -296,6 +300,10 @@ class AdminViewModel(
         serverConnectivityJob = null
         val savedSetup = runCatching { serverSetupStore.get(serverId) }.getOrNull()
         val setupState = when {
+            savedSetup?.hostKeyChanged == true -> InitialSetupUiState(
+                mode = InitialSetupUiMode.SSH_HOST_KEY_CHANGED,
+                observedFingerprint = savedSetup.observedFingerprint,
+            )
             savedSetup?.configured == true -> InitialSetupUiState(InitialSetupUiMode.CONFIGURED)
             savedSetup?.inProgress == true -> InitialSetupUiState(
                 mode = InitialSetupUiMode.RUNNING,
@@ -1053,6 +1061,45 @@ class AdminViewModel(
         inspectInitialSetup(serverId, continuation = InitialSetupContinuation.NONE)
     }
 
+    fun retryChangedHostKey(serverId: String) {
+        if (serverOperationJob?.isActive == true) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        if (serverSetupStore.get(serverId)?.hostKeyChanged != true) return
+        mutableState.update { state ->
+            state.copy(
+                initialSetup = state.initialSetup.copy(hostKeyCheckInProgress = true),
+                notice = null,
+            )
+        }
+        serverOperationJob = viewModelScope.launch {
+            var inspectServer = false
+            try {
+                val observedHostKey = sshAccessChecker.scanHostKey(server.resolvedEndpoint())
+                if (server.hostKey.sameKeyAs(observedHostKey)) {
+                    serverSetupStore.remove(server.id)
+                    mutableState.update {
+                        it.copy(initialSetup = InitialSetupUiState())
+                    }
+                    inspectServer = true
+                } else {
+                    markHostKeyChanged(server, observedHostKey)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                mutableState.update { state ->
+                    state.copy(
+                        initialSetup = state.initialSetup.copy(hostKeyCheckInProgress = false),
+                        notice = "Не удалось повторно проверить SSH fingerprint",
+                    )
+                }
+            } finally {
+                serverOperationJob = null
+                if (inspectServer) checkInitialSetup(serverId)
+            }
+        }
+    }
+
     fun checkAndContinueInitialSetup(serverId: String) {
         inspectInitialSetup(serverId, continuation = InitialSetupContinuation.ANY_INCOMPLETE)
     }
@@ -1110,15 +1157,17 @@ class AdminViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                mutableState.update {
-                    it.copy(
-                        initialSetup = if (previousSetup.mode == InitialSetupUiMode.CONFIGURED) {
-                            previousSetup
-                        } else {
-                            InitialSetupUiState(InitialSetupUiMode.UNKNOWN)
-                        },
-                        notice = setupErrorMessage(error),
-                    )
+                if (error !is SshFailure.HostKeyChanged) {
+                    mutableState.update {
+                        it.copy(
+                            initialSetup = if (previousSetup.mode == InitialSetupUiMode.CONFIGURED) {
+                                previousSetup
+                            } else {
+                                InitialSetupUiState(InitialSetupUiMode.UNKNOWN)
+                            },
+                            notice = setupErrorMessage(error),
+                        )
+                    }
                 }
             } finally {
                 serverOperationJob = null
@@ -1231,17 +1280,19 @@ class AdminViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                val failedSetup = serverSetupStore.get(serverId)
-                    ?.takeIf(StoredServerSetup::inProgress)
-                    ?: setup
-                mutableState.update {
-                    it.copy(
-                        serverOperation = null,
-                        initialSetup = failedSetup.toUiState(
-                            mode = InitialSetupUiMode.FAILED,
-                            errorMessage = setupErrorMessage(error),
-                        ),
-                    )
+                if (error !is SshFailure.HostKeyChanged) {
+                    val failedSetup = serverSetupStore.get(serverId)
+                        ?.takeIf(StoredServerSetup::inProgress)
+                        ?: setup
+                    mutableState.update {
+                        it.copy(
+                            serverOperation = null,
+                            initialSetup = failedSetup.toUiState(
+                                mode = InitialSetupUiMode.FAILED,
+                                errorMessage = setupErrorMessage(error),
+                            ),
+                        )
+                    }
                 }
             } finally {
                 serverOperationJob = null
@@ -1528,22 +1579,55 @@ class AdminViewModel(
     }
 
     private suspend fun connectToServer(server: ServerRecord): SshConnection {
-        val endpoint = ResolvedEndpoint(
-            enteredAddress = server.enteredAddress,
-            sshPort = server.sshPort,
-            frozenIpv4 = server.frozenIpv4,
-            addressKind = if (server.enteredAddress == server.frozenIpv4) {
-                AddressKind.IPV4
-            } else {
-                AddressKind.DNS
-            },
+        check(serverSetupStore.get(server.id)?.hostKeyChanged != true) {
+            "SSH access is blocked because the host key changed"
+        }
+        return try {
+            sshAccessChecker.connect(
+                endpoint = server.resolvedEndpoint(),
+                login = server.sshLogin,
+                credential = SshCredential.ManagedKey(server.keystoreAlias),
+                pinnedHostKey = server.hostKey,
+            )
+        } catch (error: SshFailure.HostKeyChanged) {
+            markHostKeyChanged(server, error.observedHostKey)
+            throw error
+        }
+    }
+
+    private fun ServerRecord.resolvedEndpoint() = ResolvedEndpoint(
+        enteredAddress = enteredAddress,
+        sshPort = sshPort,
+        frozenIpv4 = frozenIpv4,
+        addressKind = if (enteredAddress == frozenIpv4) AddressKind.IPV4 else AddressKind.DNS,
+    )
+
+    private fun markHostKeyChanged(server: ServerRecord, observedHostKey: PinnedHostKey) {
+        serverSetupStore.get(server.id)?.let(::releaseSetupBinary)
+        serverSetupStore.put(
+            server.id,
+            StoredServerSetup(
+                configured = false,
+                status = StoredServerSetupStatus.SSH_HOST_KEY_CHANGED,
+                observedFingerprint = observedHostKey.sha256Fingerprint,
+            ),
         )
-        return sshAccessChecker.connect(
-            endpoint = endpoint,
-            login = server.sshLogin,
-            credential = SshCredential.ManagedKey(server.keystoreAlias),
-            pinnedHostKey = server.hostKey,
-        )
+        mutableState.update { state ->
+            if (state.route.serverIdOrNull() != server.id) return@update state
+            state.copy(
+                route = AdminRoute.ServerDetails(server.id),
+                serverOperation = null,
+                serverConnectivity = ServerConnectivityUiState(),
+                serverUsers = ServerUsersUiState(),
+                addServerUser = AddServerUserState(),
+                serverUserDetails = ServerUserDetailsUiState(),
+                initialSetup = InitialSetupUiState(
+                    mode = InitialSetupUiMode.SSH_HOST_KEY_CHANGED,
+                    observedFingerprint = observedHostKey.sha256Fingerprint,
+                ),
+                notice = null,
+            )
+        }
     }
 
     private fun sshCheckErrorMessage(error: Exception): String = when (error) {
@@ -2033,3 +2117,13 @@ private class LocalPersistenceException(cause: Throwable) :
 
 private fun PinnedHostKey.sameKeyAs(other: PinnedHostKey): Boolean =
     algorithm == other.algorithm && sshWireKeyBase64 == other.sshWireKeyBase64
+
+private fun AdminRoute.serverIdOrNull(): String? = when (this) {
+    AdminRoute.ServerList,
+    AdminRoute.AddServer,
+    -> null
+    is AdminRoute.ServerDetails -> serverId
+    is AdminRoute.ServerUsers -> serverId
+    is AdminRoute.AddServerUser -> serverId
+    is AdminRoute.ServerUserDetails -> serverId
+}

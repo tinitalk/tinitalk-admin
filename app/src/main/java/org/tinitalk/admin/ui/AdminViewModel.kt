@@ -15,6 +15,7 @@ import org.tinitalk.admin.data.SharedPreferencesServerStore
 import org.tinitalk.admin.data.SharedPreferencesServerSetupStore
 import org.tinitalk.admin.data.StoredServerSetup
 import org.tinitalk.admin.data.StoredServerSetupStatus
+import org.tinitalk.admin.data.forRetry
 import org.tinitalk.admin.model.PinnedHostKey
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.server.DnsValidationException
@@ -1261,6 +1262,8 @@ class AdminViewModel(
 
     fun retryInitialSetup(serverId: String) {
         if (mutableState.value.initialSetup.mode != InitialSetupUiMode.FAILED) return
+        val setup = serverSetupStore.get(serverId)?.takeIf(StoredServerSetup::inProgress) ?: return
+        serverSetupStore.put(serverId, setup.forRetry())
         resumeInitialSetup(serverId)
     }
 

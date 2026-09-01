@@ -29,6 +29,11 @@ data class StoredServerSetup(
         get() = status == StoredServerSetupStatus.SSH_HOST_KEY_CHANGED
 }
 
+fun StoredServerSetup.forRetry(): StoredServerSetup {
+    check(inProgress) { "Only an in-progress setup can be retried" }
+    return copy(operationStarted = false)
+}
+
 interface ServerSetupStore {
     fun get(serverId: String): StoredServerSetup?
     fun put(serverId: String, setup: StoredServerSetup)

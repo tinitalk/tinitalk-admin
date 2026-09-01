@@ -64,7 +64,7 @@ fun ServerDetailsScreen(
     snackbarHostState: SnackbarHostState,
     serverConnectivity: ServerConnectivityUiState,
     initialSetup: InitialSetupUiState,
-    tinitalkFiles: TiniTalkFilesState,
+    binarySelection: TiniTalkBinaryState,
     serverOperationStartedAt: Long?,
     serverOperationInProgress: Boolean,
     onBack: () -> Unit,
@@ -77,10 +77,8 @@ fun ServerDetailsScreen(
     onCheckAndContinueInitialSetup: () -> Unit,
     onContinueInitialSetup: () -> Unit,
     onRetryInitialSetup: () -> Unit,
-    onCloseTiniTalkFiles: () -> Unit,
+    onCloseTiniTalkBinary: () -> Unit,
     onChooseTiniTalkBinary: () -> Unit,
-    onChooseFirebaseAndroidConfig: () -> Unit,
-    onChooseFirebaseServiceAccount: () -> Unit,
     onStartInitialSetup: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -254,39 +252,27 @@ fun ServerDetailsScreen(
         }
     }
 
-    if (tinitalkFiles.visible) {
+    if (binarySelection.visible) {
         AlertDialog(
-            onDismissRequest = onCloseTiniTalkFiles,
+            onDismissRequest = onCloseTiniTalkBinary,
             title = { Text("Первичная настройка") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FileSelectionButton(
-                        label = "Бинарник TiniTalk Server",
-                        fileName = tinitalkFiles.binaryName,
-                        onClick = onChooseTiniTalkBinary,
-                    )
-                    FileSelectionButton(
-                        label = "google-services.json",
-                        fileName = tinitalkFiles.firebaseAndroidConfigName,
-                        onClick = onChooseFirebaseAndroidConfig,
-                    )
-                    FileSelectionButton(
-                        label = "firebase-service-account.json",
-                        fileName = tinitalkFiles.firebaseServiceAccountName,
-                        onClick = onChooseFirebaseServiceAccount,
-                    )
-                }
+                FileSelectionButton(
+                    label = "Бинарник TiniTalk Server",
+                    fileName = binarySelection.binaryName,
+                    onClick = onChooseTiniTalkBinary,
+                )
             },
             confirmButton = {
                 TextButton(
                     onClick = onStartInitialSetup,
-                    enabled = tinitalkFiles.ready,
+                    enabled = binarySelection.ready,
                 ) {
                     Text("Начать")
                 }
             },
             dismissButton = {
-                TextButton(onClick = onCloseTiniTalkFiles) {
+                TextButton(onClick = onCloseTiniTalkBinary) {
                     Text("Отмена")
                 }
             },
@@ -829,7 +815,7 @@ private fun InitialSetupStep.displayName(): String = when (this) {
     InitialSetupStep.FIREWALL -> "Firewall"
     InitialSetupStep.TLS_CERTIFICATE -> "TLS-сертификат"
     InitialSetupStep.PREPARE_TINITALK -> "Подготовка TiniTalk"
-    InitialSetupStep.UPLOAD_FILES -> "Загрузка файлов"
+    InitialSetupStep.UPLOAD_BINARY -> "Загрузка бинарника"
     InitialSetupStep.START_TINITALK -> "Запуск TiniTalk"
 }
 

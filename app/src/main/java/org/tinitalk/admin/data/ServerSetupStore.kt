@@ -12,8 +12,6 @@ data class StoredServerSetup(
     @SerializedName("operationStarted") val operationStarted: Boolean = false,
     @SerializedName("completedSteps") val completedSteps: Set<InitialSetupStep>? = null,
     @SerializedName("binaryUri") val binaryUri: String? = null,
-    @SerializedName("firebaseAndroidConfigUri") val firebaseAndroidConfigUri: String? = null,
-    @SerializedName("firebaseServiceAccountUri") val firebaseServiceAccountUri: String? = null,
 ) {
     val inProgress: Boolean
         get() = !configured && startedAtEpochMillis != null && currentStep != null

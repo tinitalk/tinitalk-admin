@@ -11,7 +11,7 @@ enum class InitialSetupStep(val operationKind: ServerOperationKind) {
     FIREWALL(ServerOperationKind.CONFIGURE_FIREWALL),
     TLS_CERTIFICATE(ServerOperationKind.OBTAIN_TLS_CERTIFICATE),
     PREPARE_TINITALK(ServerOperationKind.PREPARE_TINITALK),
-    UPLOAD_FILES(ServerOperationKind.INSTALL_TINITALK_FILES),
+    UPLOAD_BINARY(ServerOperationKind.INSTALL_TINITALK_BINARY),
     START_TINITALK(ServerOperationKind.START_TINITALK),
     ;
 
@@ -31,8 +31,9 @@ data class InitialSetupEvidence(
     val firewallReady: Boolean = false,
     val tlsCertificateReady: Boolean = false,
     val tinitalkPrepared: Boolean = false,
-    val filesUploaded: Boolean = false,
+    val binaryUploaded: Boolean = false,
     val tinitalkStarted: Boolean = false,
+    val doctorReady: Boolean = false,
     val binaryInstalled: Boolean = false,
     val userPresent: Boolean = false,
     val dataDirectoryPresent: Boolean = false,
@@ -47,12 +48,20 @@ data class InitialSetupEvidence(
         if (firewallReady) add(InitialSetupStep.FIREWALL)
         if (tlsCertificateReady) add(InitialSetupStep.TLS_CERTIFICATE)
         if (tinitalkPrepared) add(InitialSetupStep.PREPARE_TINITALK)
-        if (filesUploaded) add(InitialSetupStep.UPLOAD_FILES)
+        if (binaryUploaded) add(InitialSetupStep.UPLOAD_BINARY)
         if (tinitalkStarted) add(InitialSetupStep.START_TINITALK)
     }
 
     fun assessment(): ServerSetupAssessment = when {
-        completedSteps().size == InitialSetupStep.entries.size -> {
+        doctorReady &&
+            binaryInstalled &&
+            userPresent &&
+            dataDirectoryPresent &&
+            stateDatabasePresent &&
+            tlsPresent &&
+            serviceInstalled &&
+            serviceEnabled &&
+            serviceRunning -> {
             ServerSetupAssessment.CONFIGURED
         }
 

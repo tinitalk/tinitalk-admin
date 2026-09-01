@@ -14,6 +14,7 @@ print_status() {
 
 system_packages_ready() {
     command -v snap >/dev/null 2>&1 &&
+        command -v sysctl >/dev/null 2>&1 &&
         command -v ufw >/dev/null 2>&1 &&
         [ -x /usr/local/bin/certbot ] &&
         systemctl is-active --quiet systemd-timesyncd
@@ -36,7 +37,13 @@ firewall_ready() {
         firewall_rule_present "3478/tcp" &&
         firewall_rule_present "3478/udp" &&
         firewall_rule_present "5349/tcp" &&
-        firewall_rule_present "49152:49663/udp"
+        firewall_rule_present "49152:49663/udp" &&
+        sysctl -n net.ipv4.ip_local_reserved_ports |
+            tr ',' '\n' |
+            awk -F- '
+                $1 <= 49152 && ($2 == "" ? $1 : $2) >= 49663 { found = 1 }
+                END { exit !found }
+            '
 }
 
 certificate_ready() {
@@ -51,13 +58,8 @@ prepare_ready() {
         [ -s /var/lib/tinitalk/tls/privkey.pem ]
 }
 
-files_ready() {
-    [ -x /usr/local/bin/tinitalk ] && {
-        [ -s /var/lib/tinitalk/state.db ] || {
-            [ -s /var/lib/tinitalk/google-services.json ] &&
-                [ -s /var/lib/tinitalk/firebase-service-account.json ]
-        }
-    }
+binary_ready() {
+    [ -x /usr/local/bin/tinitalk ]
 }
 
 service_ready() {
@@ -67,12 +69,26 @@ service_ready() {
         systemctl is-active --quiet tinitalk.service
 }
 
+doctor_ready() {
+    [ -x /usr/local/bin/tinitalk ] || return 1
+    id tinitalk >/dev/null 2>&1 || return 1
+
+    output=$(runuser -u tinitalk -- \
+        /usr/local/bin/tinitalk doctor --data-dir /var/lib/tinitalk 2>/dev/null) || return 1
+
+    printf '%s\n' "$output" | grep -qx 'database.integrity: ok' &&
+        printf '%s\n' "$output" | grep -qx 'database.foreign_keys: ok' &&
+        printf '%s\n' "$output" | grep -qx 'turn.secret: ok' &&
+        printf '%s\n' "$output" | grep -qx 'webpush.vapid: ok'
+}
+
 print_status system_packages system_packages_ready
 print_status firewall firewall_ready
 print_status tls_certificate certificate_ready
 print_status prepare_tinitalk prepare_ready
-print_status upload_files files_ready
+print_status upload_binary binary_ready
 print_status start_tinitalk service_ready
+print_status doctor doctor_ready
 
 if [ -x /usr/local/bin/tinitalk ]; then
     echo "binary=present"

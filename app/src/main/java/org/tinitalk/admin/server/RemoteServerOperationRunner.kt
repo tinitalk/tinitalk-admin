@@ -30,9 +30,9 @@ enum class ServerOperationKind(
         scriptName = "prepare_tinitalk.sh",
         timeout = "1min",
     ),
-    INSTALL_TINITALK_FILES(
-        unitName = "tinitalk-admin-install-tinitalk-files.service",
-        scriptName = "install_tinitalk_files.sh",
+    INSTALL_TINITALK_BINARY(
+        unitName = "tinitalk-admin-install-tinitalk-binary.service",
+        scriptName = "install_tinitalk_binary.sh",
         timeout = "2min",
         receivesStagingDirectory = true,
     ),

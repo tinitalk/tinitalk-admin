@@ -4,29 +4,14 @@ set -eu
 server_address=$1
 public_ipv4=$2
 data_dir=/var/lib/tinitalk
-service_account=$data_dir/firebase-service-account.json
-android_config=$data_dir/google-services.json
 
 test -x /usr/local/bin/tinitalk
 test -s $data_dir/tls/fullchain.pem
 test -s $data_dir/tls/privkey.pem
 systemctl stop tinitalk.service >/dev/null 2>&1 || true
 
-# Import Firebase configuration during the first initialization.
-if [ -f "$service_account" ] || [ -f "$android_config" ]; then
-    test -s "$service_account"
-    test -s "$android_config"
-
-    runuser -u tinitalk -- /usr/local/bin/tinitalk init \
-        --data-dir "$data_dir" \
-        --fcm-service-account "$service_account" \
-        --firebase-android-config "$android_config"
-
-    rm -f "$service_account" "$android_config"
-elif [ ! -s "$data_dir/state.db" ]; then
-    echo "TiniTalk configuration files are missing" >&2
-    exit 1
-fi
+# Initialize the database and create the WebPush VAPID keys.
+runuser -u tinitalk -- /usr/local/bin/tinitalk init --data-dir "$data_dir"
 
 # Configure the TiniTalk system service.
 cat > /etc/systemd/system/tinitalk.service <<EOF

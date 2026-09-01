@@ -13,8 +13,9 @@ class InitialSetupTest {
     }
 
     @Test
-    fun classifiesOnlyFullyRunningInstallationAsConfigured() {
+    fun classifiesWorkingInstallationAsConfiguredRegardlessOfInstaller() {
         val configured = InitialSetupEvidence(
+            doctorReady = true,
             binaryInstalled = true,
             userPresent = true,
             dataDirectoryPresent = true,
@@ -28,6 +29,10 @@ class InitialSetupTest {
         assertEquals(
             ServerSetupAssessment.PARTIAL,
             configured.copy(serviceRunning = false).assessment(),
+        )
+        assertEquals(
+            ServerSetupAssessment.PARTIAL,
+            configured.copy(doctorReady = false).assessment(),
         )
     }
 

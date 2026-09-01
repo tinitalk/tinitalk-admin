@@ -45,14 +45,6 @@ fun AdminApp(viewModel: AdminViewModel) {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = viewModel::tinitalkBinarySelected,
     )
-    val firebaseAndroidConfigPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-        onResult = viewModel::firebaseAndroidConfigSelected,
-    )
-    val firebaseServiceAccountPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-        onResult = viewModel::firebaseServiceAccountSelected,
-    )
 
     LaunchedEffect(state.notice) {
         state.notice?.let {
@@ -127,7 +119,7 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 snackbarHostState = snackbarHostState,
                                 serverConnectivity = state.serverConnectivity,
                                 initialSetup = state.initialSetup,
-                                tinitalkFiles = state.tinitalkFiles,
+                                binarySelection = state.binarySelection,
                                 serverOperationStartedAt = runningOperation?.startedAt
                                     ?.takeIf { runningOperation.serverId == server.id },
                                 serverOperationInProgress = runningOperation != null,
@@ -153,20 +145,10 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 onRetryInitialSetup = {
                                     viewModel.retryInitialSetup(server.id)
                                 },
-                                onCloseTiniTalkFiles = viewModel::closeTiniTalkFiles,
+                                onCloseTiniTalkBinary = viewModel::closeTiniTalkBinary,
                                 onChooseTiniTalkBinary = {
                                     tinitalkBinaryPicker.launch(
                                         arrayOf("application/octet-stream", "*/*"),
-                                    )
-                                },
-                                onChooseFirebaseAndroidConfig = {
-                                    firebaseAndroidConfigPicker.launch(
-                                        arrayOf("application/json", "text/plain", "*/*"),
-                                    )
-                                },
-                                onChooseFirebaseServiceAccount = {
-                                    firebaseServiceAccountPicker.launch(
-                                        arrayOf("application/json", "text/plain", "*/*"),
                                     )
                                 },
                                 onStartInitialSetup = {

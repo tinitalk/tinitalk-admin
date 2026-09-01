@@ -117,7 +117,7 @@ data class AdminUiState(
     val serverUsers: ServerUsersUiState = ServerUsersUiState(),
     val addServerUser: AddServerUserState = AddServerUserState(),
     val serverUserDetails: ServerUserDetailsUiState = ServerUserDetailsUiState(),
-    val tinitalkFiles: TiniTalkFilesState = TiniTalkFilesState(),
+    val binarySelection: TiniTalkBinaryState = TiniTalkBinaryState(),
     val notice: String? = null,
 )
 
@@ -176,16 +176,12 @@ private enum class InitialSetupContinuation {
     ANY_INCOMPLETE,
 }
 
-data class TiniTalkFilesState(
+data class TiniTalkBinaryState(
     val visible: Boolean = false,
     val binaryName: String? = null,
-    val firebaseAndroidConfigName: String? = null,
-    val firebaseServiceAccountName: String? = null,
 ) {
     val ready: Boolean
-        get() = binaryName != null &&
-            firebaseAndroidConfigName != null &&
-            firebaseServiceAccountName != null
+        get() = binaryName != null
 }
 
 data class RunningServerOperation(
@@ -266,8 +262,6 @@ class AdminViewModel(
     private var pendingHostKey: PinnedHostKey? = null
     private var selectedPrivateKeyUri: Uri? = null
     private var selectedTiniTalkBinaryUri: Uri? = null
-    private var selectedFirebaseAndroidConfigUri: Uri? = null
-    private var selectedFirebaseServiceAccountUri: Uri? = null
 
     fun openAddServer() {
         invalidateOperation()
@@ -336,7 +330,7 @@ class AdminViewModel(
         changeServerUserAccessJob = null
         renameServerUserJob?.cancel()
         renameServerUserJob = null
-        discardSelectedTiniTalkFiles()
+        discardSelectedTiniTalkBinary()
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerList,
@@ -344,7 +338,7 @@ class AdminViewModel(
                 serverUsers = ServerUsersUiState(),
                 addServerUser = AddServerUserState(),
                 serverUserDetails = ServerUserDetailsUiState(),
-                tinitalkFiles = TiniTalkFilesState(),
+                binarySelection = TiniTalkBinaryState(),
                 initialSetup = InitialSetupUiState(),
             )
         }
@@ -1145,55 +1139,27 @@ class AdminViewModel(
             )
         ) return
         val completedSteps = mutableState.value.initialSetup.completedSteps
-        if (InitialSetupStep.UPLOAD_FILES in completedSteps) {
-            discardSelectedTiniTalkFiles()
+        if (InitialSetupStep.UPLOAD_BINARY in completedSteps) {
+            discardSelectedTiniTalkBinary()
             beginInitialSetup(serverId, completedSteps)
             return
         }
-        discardSelectedTiniTalkFiles()
-        mutableState.update { it.copy(tinitalkFiles = TiniTalkFilesState(visible = true)) }
+        discardSelectedTiniTalkBinary()
+        mutableState.update { it.copy(binarySelection = TiniTalkBinaryState(visible = true)) }
     }
 
-    fun closeTiniTalkFiles() {
-        discardSelectedTiniTalkFiles()
-        mutableState.update { it.copy(tinitalkFiles = TiniTalkFilesState()) }
+    fun closeTiniTalkBinary() {
+        discardSelectedTiniTalkBinary()
+        mutableState.update { it.copy(binarySelection = TiniTalkBinaryState()) }
     }
 
     fun tinitalkBinarySelected(uri: Uri?) {
-        if (uri == null || !mutableState.value.tinitalkFiles.visible) return
+        if (uri == null || !mutableState.value.binarySelection.visible) return
         if (!preserveReadAccess(uri)) return
         selectedTiniTalkBinaryUri?.takeIf { it != uri }?.let(::releaseReadAccess)
         selectedTiniTalkBinaryUri = uri
         mutableState.update {
-            it.copy(tinitalkFiles = it.tinitalkFiles.copy(binaryName = displayName(uri)))
-        }
-    }
-
-    fun firebaseAndroidConfigSelected(uri: Uri?) {
-        if (uri == null || !mutableState.value.tinitalkFiles.visible) return
-        if (!preserveReadAccess(uri)) return
-        selectedFirebaseAndroidConfigUri?.takeIf { it != uri }?.let(::releaseReadAccess)
-        selectedFirebaseAndroidConfigUri = uri
-        mutableState.update {
-            it.copy(
-                tinitalkFiles = it.tinitalkFiles.copy(
-                    firebaseAndroidConfigName = displayName(uri),
-                ),
-            )
-        }
-    }
-
-    fun firebaseServiceAccountSelected(uri: Uri?) {
-        if (uri == null || !mutableState.value.tinitalkFiles.visible) return
-        if (!preserveReadAccess(uri)) return
-        selectedFirebaseServiceAccountUri?.takeIf { it != uri }?.let(::releaseReadAccess)
-        selectedFirebaseServiceAccountUri = uri
-        mutableState.update {
-            it.copy(
-                tinitalkFiles = it.tinitalkFiles.copy(
-                    firebaseServiceAccountName = displayName(uri),
-                ),
-            )
+            it.copy(binarySelection = it.binarySelection.copy(binaryName = displayName(uri)))
         }
     }
 
@@ -1207,14 +1173,10 @@ class AdminViewModel(
             serverOperationJob?.isActive == true
         ) return
         val binary = selectedTiniTalkBinaryUri ?: return
-        val androidConfig = selectedFirebaseAndroidConfigUri ?: return
-        val serviceAccount = selectedFirebaseServiceAccountUri ?: return
         beginInitialSetup(
             serverId = serverId,
             completedSteps = mutableState.value.initialSetup.completedSteps,
             binaryUri = binary,
-            firebaseAndroidConfigUri = androidConfig,
-            firebaseServiceAccountUri = serviceAccount,
         )
     }
 
@@ -1222,17 +1184,13 @@ class AdminViewModel(
         serverId: String,
         completedSteps: Set<InitialSetupStep>,
         binaryUri: Uri? = null,
-        firebaseAndroidConfigUri: Uri? = null,
-        firebaseServiceAccountUri: Uri? = null,
     ) {
         val firstIncompleteStep = InitialSetupStep.entries.firstOrNull {
             it !in completedSteps
         } ?: return
         if (
-            InitialSetupStep.UPLOAD_FILES !in completedSteps &&
-            (binaryUri == null ||
-                firebaseAndroidConfigUri == null ||
-                firebaseServiceAccountUri == null)
+            InitialSetupStep.UPLOAD_BINARY !in completedSteps &&
+            binaryUri == null
         ) return
         val setup = StoredServerSetup(
             configured = false,
@@ -1240,14 +1198,12 @@ class AdminViewModel(
             currentStep = firstIncompleteStep,
             completedSteps = completedSteps,
             binaryUri = binaryUri?.toString(),
-            firebaseAndroidConfigUri = firebaseAndroidConfigUri?.toString(),
-            firebaseServiceAccountUri = firebaseServiceAccountUri?.toString(),
         )
         serverSetupStore.put(serverId, setup)
-        clearSelectedTiniTalkFiles()
+        clearSelectedTiniTalkBinary()
         mutableState.update {
             it.copy(
-                tinitalkFiles = TiniTalkFilesState(),
+                binarySelection = TiniTalkBinaryState(),
                 initialSetup = setup.toUiState(),
             )
         }
@@ -1315,7 +1271,7 @@ class AdminViewModel(
                     null
                 }
                 if (remote == null) {
-                    if (step == InitialSetupStep.UPLOAD_FILES) {
+                    if (step == InitialSetupStep.UPLOAD_BINARY) {
                         uploads = loadSetupUploads(setup)
                     }
                     setup = setup.copy(operationStarted = true)
@@ -1373,7 +1329,7 @@ class AdminViewModel(
                     }
                     return
                 }
-                releaseSetupFiles(setup)
+                releaseSetupBinary(setup)
                 serverSetupStore.put(server.id, StoredServerSetup(configured = true))
                 mutableState.update {
                     it.copy(
@@ -1447,7 +1403,7 @@ class AdminViewModel(
             server.enteredAddress,
         )
         InitialSetupStep.PREPARE_TINITALK -> listOf(server.enteredAddress)
-        InitialSetupStep.UPLOAD_FILES -> emptyList()
+        InitialSetupStep.UPLOAD_BINARY -> emptyList()
         InitialSetupStep.START_TINITALK -> listOf(server.enteredAddress, server.frozenIpv4)
     }
 
@@ -1455,11 +1411,6 @@ class AdminViewModel(
         withContext(Dispatchers.IO) {
             listOf(
                 readSetupUpload(setup.binaryUri, "tinitalk"),
-                readSetupUpload(setup.firebaseAndroidConfigUri, "google-services.json"),
-                readSetupUpload(
-                    setup.firebaseServiceAccountUri,
-                    "firebase-service-account.json",
-                ),
             )
         }
 
@@ -1490,21 +1441,13 @@ class AdminViewModel(
         },
     )
 
-    private fun releaseSetupFiles(setup: StoredServerSetup) {
-        listOf(
-            setup.binaryUri,
-            setup.firebaseAndroidConfigUri,
-            setup.firebaseServiceAccountUri,
-        ).filterNotNull().map(Uri::parse).forEach(::releaseReadAccess)
+    private fun releaseSetupBinary(setup: StoredServerSetup) {
+        setup.binaryUri?.let(Uri::parse)?.let(::releaseReadAccess)
     }
 
-    private fun discardSelectedTiniTalkFiles() {
-        listOf(
-            selectedTiniTalkBinaryUri,
-            selectedFirebaseAndroidConfigUri,
-            selectedFirebaseServiceAccountUri,
-        ).filterNotNull().forEach(::releaseReadAccess)
-        clearSelectedTiniTalkFiles()
+    private fun discardSelectedTiniTalkBinary() {
+        selectedTiniTalkBinaryUri?.let(::releaseReadAccess)
+        clearSelectedTiniTalkBinary()
     }
 
     private fun releaseReadAccess(uri: Uri) {
@@ -1516,10 +1459,8 @@ class AdminViewModel(
         }
     }
 
-    private fun clearSelectedTiniTalkFiles() {
+    private fun clearSelectedTiniTalkBinary() {
         selectedTiniTalkBinaryUri = null
-        selectedFirebaseAndroidConfigUri = null
-        selectedFirebaseServiceAccountUri = null
     }
 
     fun renameServer(serverId: String, value: String) {
@@ -1537,7 +1478,7 @@ class AdminViewModel(
         viewModelScope.launch {
             val records = try {
                 withContext(Dispatchers.IO) {
-                    serverSetupStore.get(serverId)?.let(::releaseSetupFiles)
+                    serverSetupStore.get(serverId)?.let(::releaseSetupBinary)
                     serverSetupStore.remove(serverId)
                     identityStore.delete(server.keystoreAlias)
                     serverStore.remove(serverId)
@@ -2068,7 +2009,7 @@ private fun ServerOperationKind.failureMessage(): String = when (this) {
     ServerOperationKind.CONFIGURE_FIREWALL -> "Не удалось настроить firewall"
     ServerOperationKind.OBTAIN_TLS_CERTIFICATE -> "Не удалось получить TLS-сертификат"
     ServerOperationKind.PREPARE_TINITALK -> "Не удалось подготовить TiniTalk"
-    ServerOperationKind.INSTALL_TINITALK_FILES -> "Не удалось загрузить файлы TiniTalk"
+    ServerOperationKind.INSTALL_TINITALK_BINARY -> "Не удалось загрузить бинарник TiniTalk"
     ServerOperationKind.START_TINITALK -> "Не удалось запустить TiniTalk"
 }
 

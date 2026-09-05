@@ -8,8 +8,7 @@ GRADLE_FLAGS ?= --no-daemon
 ifeq ($(OS),Windows_NT)
 SHELL := cmd.exe
 .SHELLFLAGS := /C
-JAVA17 ?= C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot
-RUN_GRADLE = set JAVA_HOME=$(JAVA17)&& gradlew.bat $(GRADLE_FLAGS) $(1)
+RUN_GRADLE = gradlew.bat $(GRADLE_FLAGS) $(1)
 CREATE_DIST = if not exist dist mkdir dist
 COPY_CLIENT = copy /Y app\build\outputs\apk\debug\app-debug.apk dist\tinitalk-admin-debug.apk >NUL
 COPY_CLIENT_MIN = copy /Y app\build\outputs\apk\release\app-release.apk dist\tinitalk-admin-min.apk >NUL
@@ -23,8 +22,7 @@ CLEAN_DIST = rm -rf dist
 ifneq ($(WSL_DISTRO_NAME),)
 WINDOWS_CMD ?= /mnt/c/Windows/System32/cmd.exe
 WINDOWS_ROOT := $(shell wslpath -w "$(CURDIR)")
-JAVA17 ?= C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot
-RUN_GRADLE = $(WINDOWS_CMD) /D /C "cd /D $(WINDOWS_ROOT) && set JAVA_HOME=$(JAVA17)&& gradlew.bat $(GRADLE_FLAGS) $(1)"
+RUN_GRADLE = "$(WINDOWS_CMD)" /D /C "cd /D $(WINDOWS_ROOT) && gradlew.bat $(GRADLE_FLAGS) $(1)"
 else
 RUN_GRADLE = ./gradlew $(GRADLE_FLAGS) $(1)
 endif

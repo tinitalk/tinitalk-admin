@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
 }
 
@@ -26,11 +25,12 @@ val commitHash = runCatching {
 
 android {
     namespace = "org.tinitalk.admin"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "org.tinitalk.admin"
         minSdk = 26
+        // Updating compileSdk must not opt into new runtime permission requirements.
         targetSdk = 36
         versionCode = 1
         versionName = "0.1"
@@ -47,7 +47,7 @@ android {
         compose = true
     }
 
-    sourceSets.getByName("main").assets.srcDir(rootProject.file("ssh-scripts"))
+    sourceSets.getByName("main").assets.directories.add(rootProject.file("ssh-scripts").path)
 
     buildTypes {
         getByName("release") {
@@ -62,10 +62,12 @@ android {
     }
 
     packaging {
+        // Preserve the license texts shared by Bouncy Castle's JARs.
+        resources.merges += "/META-INF/LICENSE.md"
         resources.excludes += setOf(
-            "/org/bouncycastle/pqc/crypto/picnic/lowmcL1.bin.properties",
-            "/org/bouncycastle/pqc/crypto/picnic/lowmcL3.bin.properties",
-            "/org/bouncycastle/pqc/crypto/picnic/lowmcL5.bin.properties",
+            "/org/bouncycastle/pqc/legacy/picnic/lowmcL1.bin.properties",
+            "/org/bouncycastle/pqc/legacy/picnic/lowmcL3.bin.properties",
+            "/org/bouncycastle/pqc/legacy/picnic/lowmcL5.bin.properties",
         )
     }
 
@@ -87,6 +89,9 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.sshj)
+
+    // Use Bouncy Castle's coordinated versions for SSHJ's transitive dependencies.
+    implementation(platform(libs.bouncycastle.bom))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

@@ -1,9 +1,26 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
 }
 
 val repositoryDir = rootDir
+val tinitalkAdminVersion = "0.1.0"
+val releaseTag = providers.gradleProperty("releaseTag").orNull
+val releaseSigningPropertiesFile = rootProject.file("keystore/release.properties")
+val releaseSigningPropertiesResult = runCatching {
+    Properties().apply {
+        if (releaseSigningPropertiesFile.isFile) {
+            releaseSigningPropertiesFile.inputStream().use(::load)
+        }
+    }
+}
+val releaseSigningProperties = releaseSigningPropertiesResult.getOrDefault(Properties())
+
+fun signingProperty(name: String): String? =
+    releaseSigningProperties.getProperty(name)?.takeIf(String::isNotBlank)
+
 val tinitalkAdminAbi = providers.gradleProperty("tinitalkAdminAbi").getOrElse("all")
 require(tinitalkAdminAbi == "arm64" || tinitalkAdminAbi == "all") {
     "tinitalkAdminAbi must be 'arm64' or 'all'"
@@ -32,8 +49,8 @@ android {
         minSdk = 26
         // Updating compileSdk must not opt into new runtime permission requirements.
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = tinitalkAdminVersion
         buildConfigField("String", "COMMIT_HASH", "\"$commitHash\"")
         if (tinitalkAdminAbi == "arm64") {
             ndk {
@@ -49,15 +66,30 @@ android {
 
     sourceSets.getByName("main").assets.directories.add(rootProject.file("ssh-scripts").path)
 
+    signingConfigs {
+        create("release") {
+            storeFile = signingProperty("storeFile")?.let { rootProject.file(it) }
+            storePassword = signingProperty("storePassword")
+            keyAlias = signingProperty("keyAlias")
+            keyPassword = signingProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        create("min") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
         }
     }
 
@@ -75,6 +107,44 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+val validateReleaseConfiguration = tasks.register("validateReleaseConfiguration") {
+    group = "verification"
+    description = "Checks release signing settings and the optional release tag."
+    doLast {
+        check(releaseSigningPropertiesFile.isFile) {
+            "Release signing is not configured: create keystore/release.properties (see README.md)."
+        }
+        check(releaseSigningPropertiesResult.isSuccess) {
+            "Cannot read keystore/release.properties. Check the file format and permissions."
+        }
+        for (name in listOf("storeFile", "storePassword", "keyAlias", "keyPassword")) {
+            check(signingProperty(name) != null) { "Missing '$name' in keystore/release.properties." }
+        }
+        check(rootProject.file(checkNotNull(signingProperty("storeFile"))).isFile) {
+            "Release keystore does not exist. Check storeFile in keystore/release.properties."
+        }
+        check(releaseTag == null || releaseTag == "v$tinitalkAdminVersion") {
+            "Release tag must match the app version: v$tinitalkAdminVersion."
+        }
+    }
+}
+
+// Gate release packaging/signing, not IDE sync, lint or unit tests.
+tasks.configureEach {
+    if (name in setOf("validateSigningRelease", "packageRelease", "packageReleaseBundle", "signReleaseBundle", "assembleRelease", "bundleRelease")) {
+        dependsOn(validateReleaseConfiguration)
+    }
+}
+
+tasks.register<Copy>("exportReleaseApk") {
+    group = "build"
+    description = "Copies the signed release APK to dist with its version in the filename."
+    dependsOn("assembleRelease")
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    into(repositoryDir.resolve("dist"))
+    rename { "tinitalk-admin-v$tinitalkAdminVersion.apk" }
 }
 
 kotlin {

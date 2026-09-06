@@ -1,0 +1,171 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build release draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check tag, application version and signing fingerprint
+        env:
+          RELEASE_CERT_SHA256: ${{ vars.RELEASE_CERT_SHA256 }}
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Release tag must have the form vX.Y.Z"
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -Fqx "val tinitalkAdminVersion = \"$VERSION\"" app/build.gradle.kts; then
+            echo "::error::Release tag does not match the application version"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::Release tag must point to a commit in main"
+            exit 1
+          fi
+          EXPECTED_CERT_SHA256="${RELEASE_CERT_SHA256//:/}"
+          if [[ ! "$EXPECTED_CERT_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Set RELEASE_CERT_SHA256 in the release environment to the TiniTalk Admin signing fingerprint"
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+
+      - name: Restore Android signing configuration
+        shell: python
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          import base64
+          import os
+          from pathlib import Path
+
+          for name in ("ANDROID_KEYSTORE_BASE64", "ANDROID_STORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD"):
+              if not os.environ.get(name):
+                  raise SystemExit("Missing release secret: " + name)
+
+          # Java Properties escaping preserves Unicode, spaces and backslashes in secrets.
+          def property_value(value):
+              encoded = value.encode("utf-16-be").hex()
+              return "".join("\\u" + encoded[i:i + 4] for i in range(0, len(encoded), 4))
+
+          os.umask(0o077)
+          Path("keystore").mkdir(mode=0o700, exist_ok=True)
+          key = base64.b64decode("".join(os.environ["ANDROID_KEYSTORE_BASE64"].split()), validate=True)
+          if not key:
+              raise SystemExit("Empty release keystore")
+          Path("keystore/release.jks").write_bytes(key)
+          properties = {"storeFile": "keystore/release.jks",
+                        "storePassword": os.environ["ANDROID_STORE_PASSWORD"],
+                        "keyAlias": os.environ["ANDROID_KEY_ALIAS"],
+                        "keyPassword": os.environ["ANDROID_KEY_PASSWORD"]}
+          Path("keystore/release.properties").write_text(
+              "".join(name + "=" + property_value(value) + "\n" for name, value in properties.items()),
+              encoding="ascii",
+          )
+
+      - name: Test, lint and build signed APK
+        run: make client-release GRADLE_ARGS="-PreleaseTag=$GITHUB_REF_NAME"
+
+      - name: Remove Android signing files
+        if: always()
+        run: rm -f -- keystore/release.jks keystore/release.properties
+
+      - name: Verify APK signature and manifest
+        env:
+          RELEASE_CERT_SHA256: ${{ vars.RELEASE_CERT_SHA256 }}
+        run: |
+          APK="dist/tinitalk-admin-$GITHUB_REF_NAME.apk"
+          APKSIGNER="$(
+            find "$ANDROID_HOME/build-tools" \
+              -type f -name apksigner -print \
+              | sort -V \
+              | tail -n 1
+          )"
+          test -x "$APKSIGNER"
+
+          SIGNATURE_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\n' "$SIGNATURE_OUTPUT"
+          EXPECTED_CERT_SHA256="${RELEASE_CERT_SHA256//:/}"
+          if ! grep -Fqx 'Number of signers: 1' <<< "$SIGNATURE_OUTPUT" || \
+             ! printf '%s\n' "$SIGNATURE_OUTPUT" \
+               | tr -d ':' \
+               | grep -Fqi "certificate SHA-256 digest $EXPECTED_CERT_SHA256"; then
+            echo "::error::APK signing certificate does not match RELEASE_CERT_SHA256"
+            exit 1
+          fi
+          APK_ANALYZER="$(
+            find "$ANDROID_HOME/cmdline-tools" \
+              -type f -name apkanalyzer -print \
+              | sort -V \
+              | tail -n 1
+          )"
+          test -x "$APK_ANALYZER"
+
+          APP_ID="$("$APK_ANALYZER" manifest application-id "$APK")"
+          VERSION_NAME="$("$APK_ANALYZER" manifest version-name "$APK")"
+          DEBUGGABLE="$("$APK_ANALYZER" manifest debuggable "$APK")"
+          if [[ "$APP_ID" != 'org.tinitalk.admin' || "$VERSION_NAME" != "${GITHUB_REF_NAME#v}" || "$DEBUGGABLE" != 'false' ]]; then
+            echo "::error::Unexpected APK package, version or debug flag"
+            exit 1
+          fi
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum "tinitalk-admin-$GITHUB_REF_NAME.apk" > SHA256SUMS
+
+      - name: Create GitHub Release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)" != "$(git rev-parse HEAD)" ]]; then
+            echo "::error::Release tag changed since checkout"
+            exit 1
+          fi
+          EXISTING_TAGS="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')"
+          if grep -Fqx "$GITHUB_REF_NAME" <<< "$EXISTING_TAGS"; then
+            echo "::error::A release or draft already exists for this tag; it will not be replaced"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/tinitalk-admin-$GITHUB_REF_NAME.apk" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes --draft --prerelease \
+            --title "TiniTalk Admin ${GITHUB_REF_NAME#v}"

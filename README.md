@@ -1,6 +1,7 @@
 # TiniTalk Admin
 
 [![CI](https://github.com/tinitalk/tinitalk-admin/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/tinitalk/tinitalk-admin/actions/workflows/ci.yml?query=branch%3Amain)
+[![Release](https://img.shields.io/github/v/release/tinitalk/tinitalk-admin?include_prereleases&sort=semver)](https://github.com/tinitalk/tinitalk-admin/releases)
 
 TiniTalk Admin - Android-приложение для настройки и администрирования серверов
 [TiniTalk](https://github.com/tinitalk/tinitalk). Приложение подключается к VPS

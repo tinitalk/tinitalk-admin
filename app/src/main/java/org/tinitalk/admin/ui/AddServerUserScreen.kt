@@ -1,10 +1,6 @@
 package org.tinitalk.admin.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.os.Build
-import android.os.PersistableBundle
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,8 +21,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.AndroidClipboard
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.nativeClipboardManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 
@@ -122,6 +124,24 @@ fun ServerUserTokenDialog(
     onTokenCopied: () -> Unit,
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboard.current
+    // Compose checks this public Android-specific type before opening the selection menu.
+    @SuppressLint("VisibleForTests")
+    val tokenClipboard = remember(context, clipboard) {
+        object : AndroidClipboard {
+            override val clipboardManager = clipboard.nativeClipboardManager
+
+            override suspend fun getClipEntry(): ClipEntry? = clipboard.getClipEntry()
+
+            override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+                if (clipEntry == null) {
+                    clipboard.setClipEntry(null)
+                } else {
+                    SensitiveClipboard.copy(context, clipEntry.clipData)
+                }
+            }
+        }
+    }
     AlertDialog(
         onDismissRequest = {},
         title = { Text(title) },
@@ -130,23 +150,26 @@ fun ServerUserTokenDialog(
                 Text(
                     "Сохраните токен сейчас. После закрытия посмотреть его снова будет невозможно.",
                 )
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = {},
-                    readOnly = true,
-                    minLines = 2,
-                    maxLines = 3,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // Protect selection-menu, keyboard and accessibility copies from this field only.
+                CompositionLocalProvider(LocalClipboard provides tokenClipboard) {
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = {},
+                        readOnly = true,
+                        minLines = 2,
+                        maxLines = 3,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    copySensitiveText(context, token)
+                    SensitiveClipboard.copyToken(context, token)
                     onTokenCopied()
                 },
             ) {
@@ -154,15 +177,4 @@ fun ServerUserTokenDialog(
             }
         },
     )
-}
-
-private fun copySensitiveText(context: Context, value: String) {
-    val clipboard = context.getSystemService(ClipboardManager::class.java)
-    val clip = ClipData.newPlainText("TiniTalk token", value)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        clip.description.extras = PersistableBundle().apply {
-            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
-        }
-    }
-    clipboard.setPrimaryClip(clip)
 }

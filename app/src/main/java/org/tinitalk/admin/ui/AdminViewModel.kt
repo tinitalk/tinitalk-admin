@@ -16,6 +16,8 @@ import org.tinitalk.admin.data.SharedPreferencesServerSetupStore
 import org.tinitalk.admin.data.StoredServerSetup
 import org.tinitalk.admin.data.StoredServerSetupStatus
 import org.tinitalk.admin.data.forRetry
+import org.tinitalk.admin.io.InputTooLargeException
+import org.tinitalk.admin.io.readBytesLimited
 import org.tinitalk.admin.model.PinnedHostKey
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.server.DnsValidationException
@@ -1471,7 +1473,7 @@ class AdminViewModel(
 
     private fun readSetupUpload(uriValue: String?, remoteName: String): RemoteOperationUpload {
         val uri = uriValue?.let(Uri::parse) ?: error("Setup file selection is missing")
-        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytesLimited(MAX_BINARY_BYTES) }
             ?: error("Failed to open selected setup file")
         check(bytes.isNotEmpty()) { "Selected setup file is empty" }
         return RemoteOperationUpload(remoteName, bytes)
@@ -1642,6 +1644,7 @@ class AdminViewModel(
     }
 
     private fun tinitalkApiCheckErrorMessage(error: Exception): String = when (error) {
+        is InputTooLargeException -> "Ответ /healthz превышает ${error.limitBytes / 1024} КиБ"
         is UnexpectedTiniTalkServiceException -> "По этому адресу нет сервера TiniTalk"
         is UnhealthyTiniTalkServiceException -> "Сервер TiniTalk сообщил о недоступности"
         is TiniTalkHealthHttpException -> "HTTPS вернул код ${error.statusCode}"
@@ -1652,6 +1655,7 @@ class AdminViewModel(
     }
 
     private fun setupErrorMessage(error: Exception): String = when (error) {
+        is InputTooLargeException -> "Бинарник превышает ${MAX_BINARY_BYTES / (1024 * 1024)} МиБ. Выберите файл меньшего размера"
         is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
         is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
         is SshFailure.Timeout -> "Сервер не ответил вовремя"
@@ -2052,6 +2056,7 @@ class AdminViewModel(
     )
 
     companion object {
+        private const val MAX_BINARY_BYTES = 32 * 1024 * 1024
         private val SERVER_USER_LOGIN_PATTERN = Regex("[A-Za-z0-9._-]+")
         private const val MAX_SERVER_USER_LOGIN_LENGTH = 64
         private const val MAX_SERVER_USER_DISPLAY_NAME_LENGTH = 100

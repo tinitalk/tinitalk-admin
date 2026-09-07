@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -80,9 +81,25 @@ fun ServerUsersScreen(
                                 DropdownMenu(
                                     expanded = menuExpanded,
                                     onDismissRequest = { menuExpanded = false },
+                                    modifier = Modifier.widthIn(min = 260.dp),
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("Добавить пользователя") },
+                                        text = {
+                                            Text(
+                                                text = "Добавить пользователя",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                painter = painterResource(R.drawable.ic_person_add),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(24.dp),
+                                            )
+                                        },
+                                        modifier = Modifier.heightIn(min = 58.dp),
+                                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
                                         onClick = {
                                             menuExpanded = false
                                             onAddUser()

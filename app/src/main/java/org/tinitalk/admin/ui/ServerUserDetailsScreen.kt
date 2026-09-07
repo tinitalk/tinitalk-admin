@@ -3,19 +3,25 @@ package org.tinitalk.admin.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -34,8 +40,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import org.tinitalk.admin.R
 import org.tinitalk.admin.server.ServerUser
 
 @Composable
@@ -57,9 +65,11 @@ fun ServerUserDetailsScreen(
     var deleteDialogVisible by rememberSaveable(user.login) { mutableStateOf(false) }
     var rotateTokenDialogVisible by rememberSaveable(user.login) { mutableStateOf(false) }
     var accessDialogVisible by rememberSaveable(user.login) { mutableStateOf(false) }
+    var menuExpanded by rememberSaveable(user.login) { mutableStateOf(false) }
     val renameFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
+    val actionsEnabled = !state.busy && state.token == null
 
     LaunchedEffect(state.renameDialogVisible) {
         if (state.renameDialogVisible) {
@@ -81,7 +91,112 @@ fun ServerUserDetailsScreen(
             ScreenHeader(
                 title = "Пользователь",
                 onBack = onBack,
-                backEnabled = !state.busy && state.token == null,
+                backEnabled = actionsEnabled,
+                actions = {
+                    Box {
+                        IconButton(
+                            onClick = { menuExpanded = true },
+                            enabled = actionsEnabled,
+                        ) {
+                            MoreVertIcon()
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            modifier = Modifier.widthIn(min = 260.dp),
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    UserMenuItemText("Переименовать")
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_edit),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                },
+                                enabled = actionsEnabled,
+                                modifier = Modifier.heightIn(min = 58.dp),
+                                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenRename()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    UserMenuItemText("Сменить токен")
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_key),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                },
+                                enabled = actionsEnabled,
+                                modifier = Modifier.heightIn(min = 58.dp),
+                                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                                onClick = {
+                                    menuExpanded = false
+                                    rotateTokenDialogVisible = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    UserMenuItemText(
+                                        if (user.disabled) "Разблокировать" else "Заблокировать",
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(
+                                            if (user.disabled) R.drawable.ic_lock_open else R.drawable.ic_lock,
+                                        ),
+                                        contentDescription = null,
+                                        tint = if (user.disabled) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.error
+                                        },
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                },
+                                enabled = actionsEnabled,
+                                modifier = Modifier.heightIn(min = 58.dp),
+                                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                                onClick = {
+                                    menuExpanded = false
+                                    accessDialogVisible = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    UserMenuItemText(
+                                        text = "Удалить",
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_delete),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                },
+                                enabled = actionsEnabled,
+                                modifier = Modifier.heightIn(min = 58.dp),
+                                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                                onClick = {
+                                    menuExpanded = false
+                                    deleteDialogVisible = true
+                                },
+                            )
+                        }
+                    }
+                },
             )
             Surface(
                 color = MaterialTheme.colorScheme.surface,
@@ -119,105 +234,6 @@ fun ServerUserDetailsScreen(
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(14.dp),
                     )
-                }
-            }
-            OutlinedButton(
-                onClick = onOpenRename,
-                enabled = !state.busy && state.token == null,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Переименовать")
-            }
-            OutlinedButton(
-                onClick = { rotateTokenDialogVisible = true },
-                enabled = !state.busy && state.token == null,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (state.rotatingToken) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Text("Меняем…")
-                    }
-                } else {
-                    Text("Сменить токен")
-                }
-            }
-            OutlinedButton(
-                onClick = { accessDialogVisible = true },
-                enabled = !state.busy && state.token == null,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (user.disabled) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
-                    } else {
-                        MaterialTheme.colorScheme.error.copy(alpha = 0.72f)
-                    },
-                ),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = if (user.disabled) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (state.changingAccess) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(
-                            color = if (user.disabled) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Text(if (user.disabled) "Разблокируем…" else "Блокируем…")
-                    }
-                } else {
-                    Text(if (user.disabled) "Разблокировать" else "Заблокировать")
-                }
-            }
-            OutlinedButton(
-                onClick = { deleteDialogVisible = true },
-                enabled = !state.busy && state.token == null,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.error.copy(alpha = 0.72f),
-                ),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (state.deleting) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.error,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Text("Удаляем…")
-                    }
-                } else {
-                    Text("Удалить")
                 }
             }
         }
@@ -378,6 +394,19 @@ fun ServerUserDetailsScreen(
             onTokenCopied = onTokenCopied,
         )
     }
+}
+
+@Composable
+private fun UserMenuItemText(
+    text: String,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Text(
+        text = text,
+        color = color,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+    )
 }
 
 @Composable

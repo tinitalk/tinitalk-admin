@@ -6,7 +6,7 @@ plugins {
 }
 
 val repositoryDir = rootDir
-val tinitalkAdminVersion = "0.1.0"
+val tinitalkAdminVersion = "0.2.0"
 val releaseTag = providers.gradleProperty("releaseTag").orNull
 val releaseSigningPropertiesFile = rootProject.file("keystore/release.properties")
 val releaseSigningPropertiesResult = runCatching {

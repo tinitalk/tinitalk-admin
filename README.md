@@ -109,7 +109,7 @@ make client-release
 Результат:
 
 ```text
-dist/tinitalk-admin-v0.1.0.apk
+dist/tinitalk-admin-v0.2.0.apk
 ```
 
 Каталог `keystore` добавлен в `.gitignore`. Файлы `*.jks`,

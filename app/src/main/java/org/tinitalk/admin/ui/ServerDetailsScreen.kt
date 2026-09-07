@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -53,10 +55,12 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import org.tinitalk.admin.R
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.server.InitialSetupStep
 import org.tinitalk.admin.ui.theme.AccessVerifiedGreen
@@ -263,6 +267,7 @@ fun ServerDetailsScreen(
                 SetupActionButton(
                     label = "Пользователи",
                     enabled = actionsEnabled,
+                    iconResource = R.drawable.ic_contacts,
                     onClick = onOpenUsers,
                 )
             }
@@ -812,14 +817,47 @@ private fun ServerCheckIconButton(
 }
 
 @Composable
-private fun SetupActionButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun SetupActionButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    iconResource: Int? = null,
+) {
+    val withIcon = iconResource != null
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth(),
+        contentPadding = if (withIcon) {
+            PaddingValues(horizontal = 20.dp, vertical = 18.dp)
+        } else {
+            ButtonDefaults.ContentPadding
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (withIcon) Modifier.heightIn(min = 72.dp) else Modifier),
     ) {
-        Text(label)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(if (withIcon) 14.dp else 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            iconResource?.let { resource ->
+                Icon(
+                    painter = painterResource(resource),
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                )
+            }
+            if (withIcon) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            } else {
+                Text(label)
+            }
+        }
     }
 }
 

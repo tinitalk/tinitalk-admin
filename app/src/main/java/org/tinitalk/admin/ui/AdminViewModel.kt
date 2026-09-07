@@ -921,13 +921,13 @@ class AdminViewModel(
     private fun serverUserTokenErrorMessage(error: Exception): String = when (error) {
         is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
         is ServerUserAdministrativeAccessException ->
-            "Нет прав для смены токена на сервере"
+            "Нет прав для смены пароля на сервере"
         is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
         is ServerUserStorageException -> "Не удалось изменить базу пользователей"
         is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
         is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
         is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        else -> "Не удалось сменить токен"
+        else -> "Не удалось сменить пароль"
     }
 
     private fun serverUserAccessErrorMessage(error: Exception, disabling: Boolean): String = when (error) {

@@ -156,7 +156,7 @@ fun ServerUserTokenDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Сохраните токен сейчас. После закрытия посмотреть его снова будет невозможно.",
+                    "Сохраните пароль сейчас. После закрытия посмотреть его снова будет невозможно.",
                 )
                 // Protect selection-menu, keyboard and accessibility copies from this field only.
                 CompositionLocalProvider(LocalClipboard provides tokenClipboard) {

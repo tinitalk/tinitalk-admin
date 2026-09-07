@@ -18,7 +18,7 @@ internal object SensitiveClipboard {
 
     @MainThread
     fun copyToken(context: Context, token: String) {
-        copy(context, ClipData.newPlainText("TiniTalk token", token))
+        copy(context, ClipData.newPlainText("TiniTalk password", token))
     }
 
     @MainThread

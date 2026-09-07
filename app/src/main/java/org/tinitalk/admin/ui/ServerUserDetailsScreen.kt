@@ -39,6 +39,7 @@ import org.tinitalk.admin.server.ServerUser
 @Composable
 fun ServerUserDetailsScreen(
     user: ServerUser,
+    serverAddress: String,
     state: ServerUserDetailsUiState,
     onBack: () -> Unit,
     onRotateToken: () -> Unit,
@@ -362,6 +363,8 @@ fun ServerUserDetailsScreen(
     state.token?.let { token ->
         ServerUserTokenDialog(
             title = "Новый токен готов",
+            login = user.login,
+            serverAddress = serverAddress,
             token = token,
             onTokenCopied = onTokenCopied,
         )

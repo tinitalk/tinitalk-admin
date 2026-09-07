@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AddServerUserScreen(
     state: AddServerUserState,
+    serverAddress: String,
     onBack: () -> Unit,
     onLoginChange: (String) -> Unit,
     onDisplayNameChange: (String) -> Unit,
@@ -111,6 +112,8 @@ fun AddServerUserScreen(
     state.token?.let { token ->
         ServerUserTokenDialog(
             title = "Пользователь добавлен",
+            login = state.login,
+            serverAddress = serverAddress,
             token = token,
             onTokenCopied = onTokenCopied,
         )
@@ -120,11 +123,16 @@ fun AddServerUserScreen(
 @Composable
 fun ServerUserTokenDialog(
     title: String,
+    login: String,
+    serverAddress: String,
     token: String,
     onTokenCopied: () -> Unit,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
+    val accessText = remember(login, serverAddress, token) {
+        "${login.trim()}@${serverAddress.trim()}\n$token"
+    }
     // Compose checks this public Android-specific type before opening the selection menu.
     @SuppressLint("VisibleForTests")
     val tokenClipboard = remember(context, clipboard) {
@@ -153,7 +161,7 @@ fun ServerUserTokenDialog(
                 // Protect selection-menu, keyboard and accessibility copies from this field only.
                 CompositionLocalProvider(LocalClipboard provides tokenClipboard) {
                     OutlinedTextField(
-                        value = token,
+                        value = accessText,
                         onValueChange = {},
                         readOnly = true,
                         minLines = 2,
@@ -169,7 +177,7 @@ fun ServerUserTokenDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    SensitiveClipboard.copyToken(context, token)
+                    SensitiveClipboard.copyToken(context, accessText)
                     onTokenCopied()
                 },
             ) {

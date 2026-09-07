@@ -223,6 +223,10 @@ fun AdminApp(viewModel: AdminViewModel) {
                     ?: route.user
                 ServerUserDetailsScreen(
                     user = currentUser,
+                    serverAddress = state.servers
+                        .firstOrNull { it.id == route.serverId }
+                        ?.enteredAddress
+                        .orEmpty(),
                     state = state.serverUserDetails,
                     onBack = viewModel::closeServerUser,
                     onRotateToken = viewModel::rotateServerUserToken,
@@ -239,8 +243,13 @@ fun AdminApp(viewModel: AdminViewModel) {
         }
 
         if (state.route is AdminRoute.AddServerUser) {
+            val route = state.route as AdminRoute.AddServerUser
             AddServerUserScreen(
                 state = state.addServerUser,
+                serverAddress = state.servers
+                    .firstOrNull { it.id == route.serverId }
+                    ?.enteredAddress
+                    .orEmpty(),
                 onBack = viewModel::closeAddServerUser,
                 onLoginChange = viewModel::updateServerUserLogin,
                 onDisplayNameChange = viewModel::updateServerUserDisplayName,

@@ -1,6 +1,7 @@
 package org.tinitalk.admin.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,7 @@ fun ServerUserDetailsScreen(
     var accessDialogVisible by rememberSaveable(user.login) { mutableStateOf(false) }
     val renameFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
 
     LaunchedEffect(state.renameDialogVisible) {
         if (state.renameDialogVisible) {
@@ -94,7 +97,13 @@ fun ServerUserDetailsScreen(
                     modifier = Modifier.padding(18.dp),
                 ) {
                     UserProperty(label = "Имя", value = user.displayName)
-                    UserProperty(label = "Логин", value = user.login)
+                    UserProperty(
+                        label = "Логин",
+                        value = user.login,
+                        onValueClick = {
+                            copyPlainText(context, "TiniTalk user login", user.login)
+                        },
+                    )
                     UserStatusProperty(disabled = user.disabled)
                 }
             }
@@ -372,7 +381,11 @@ fun ServerUserDetailsScreen(
 }
 
 @Composable
-private fun UserProperty(label: String, value: String) {
+private fun UserProperty(
+    label: String,
+    value: String,
+    onValueClick: (() -> Unit)? = null,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = label,
@@ -383,6 +396,11 @@ private fun UserProperty(label: String, value: String) {
             text = value,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Medium,
+            modifier = if (onValueClick == null) {
+                Modifier
+            } else {
+                Modifier.clickable(onClick = onValueClick)
+            },
         )
     }
 }

@@ -1,5 +1,8 @@
 package org.tinitalk.admin.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.SystemClock
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -89,6 +93,7 @@ fun ServerDetailsScreen(
     var nameDraft by rememberSaveable(server.id) { mutableStateOf(server.displayName) }
     val renameFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
     var serverOperationElapsedSeconds by remember(serverOperationStartedAt) {
         mutableLongStateOf(serverOperationStartedAt.elapsedSeconds())
     }
@@ -212,6 +217,9 @@ fun ServerDetailsScreen(
                         ServerProperty(
                             label = "Адрес",
                             value = server.enteredAddress,
+                            onValueClick = {
+                                copyPlainText(context, "TiniTalk server address", server.enteredAddress)
+                            },
                             modifier = Modifier.weight(1f),
                         )
                         if (!hostKeyChanged) {
@@ -868,6 +876,7 @@ private fun ServerProperty(
     value: String,
     modifier: Modifier = Modifier,
     highlightValue: Boolean = false,
+    onValueClick: (() -> Unit)? = null,
 ) {
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -883,6 +892,16 @@ private fun ServerProperty(
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = if (highlightValue) FontWeight.SemiBold else FontWeight.Medium,
+            modifier = if (onValueClick == null) {
+                Modifier
+            } else {
+                Modifier.clickable(onClick = onValueClick)
+            },
         )
     }
+}
+
+internal fun copyPlainText(context: Context, label: String, text: String) {
+    val clipboard = context.applicationContext.getSystemService(ClipboardManager::class.java)
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
 }

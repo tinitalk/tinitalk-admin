@@ -6,7 +6,7 @@ plugins {
 }
 
 val repositoryDir = rootDir
-val tinitalkAdminVersion = "0.2.0"
+val tinitalkAdminVersion = "0.3.0"
 val releaseTag = providers.gradleProperty("releaseTag").orNull
 val releaseSigningPropertiesFile = rootProject.file("keystore/release.properties")
 val releaseSigningPropertiesResult = runCatching {
@@ -49,7 +49,7 @@ android {
         minSdk = 26
         // Updating compileSdk must not opt into new runtime permission requirements.
         targetSdk = 36
-        versionCode = 2
+        versionCode = 3
         versionName = tinitalkAdminVersion
         buildConfigField("String", "COMMIT_HASH", "\"$commitHash\"")
         if (tinitalkAdminAbi == "arm64") {

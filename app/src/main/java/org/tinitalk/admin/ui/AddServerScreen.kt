@@ -1,5 +1,6 @@
 package org.tinitalk.admin.ui
 
+import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -24,12 +27,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import org.tinitalk.admin.R
 
 @Composable
 fun AddServerScreen(
@@ -51,6 +58,15 @@ fun AddServerScreen(
     val formEnabled = state.phase == AddServerPhase.Form
     val operationInProgress = state.phase == AddServerPhase.ScanningFingerprint ||
         state.phase == AddServerPhase.CheckingAccess
+    val context = LocalContext.current
+    val clipboardManager = remember(context) { context.getSystemService(ClipboardManager::class.java) }
+    val clipboardText: () -> String? = {
+        clipboardManager.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(context)
+            ?.toString()
+    }
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
@@ -71,6 +87,7 @@ fun AddServerScreen(
             onAddressChange = onAddressChange,
             onPortChange = onPortChange,
             onLoginChange = onLoginChange,
+            onPasteAddress = { clipboardText()?.let(onAddressChange) },
         )
         CredentialsForm(
             state = state,
@@ -79,6 +96,8 @@ fun AddServerScreen(
             onPasswordChange = onPasswordChange,
             onPassphraseChange = onPassphraseChange,
             onChoosePrivateKey = onChoosePrivateKey,
+            onPastePassword = { clipboardText()?.let(onPasswordChange) },
+            onPastePassphrase = { clipboardText()?.let(onPassphraseChange) },
         )
 
         state.errorMessage?.let { ErrorPanel(it) }
@@ -137,6 +156,7 @@ private fun EndpointFields(
     onAddressChange: (String) -> Unit,
     onPortChange: (String) -> Unit,
     onLoginChange: (String) -> Unit,
+    onPasteAddress: () -> Unit,
 ) {
     OutlinedTextField(
         value = state.displayName,
@@ -151,6 +171,11 @@ private fun EndpointFields(
         onValueChange = onAddressChange,
         enabled = enabled,
         label = { Text("IPv4-адрес или домен") },
+        trailingIcon = if (state.address.isEmpty()) {
+            { PasteButton(enabled = enabled, onClick = onPasteAddress) }
+        } else {
+            null
+        },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
@@ -183,6 +208,8 @@ private fun CredentialsForm(
     onPasswordChange: (String) -> Unit,
     onPassphraseChange: (String) -> Unit,
     onChoosePrivateKey: () -> Unit,
+    onPastePassword: () -> Unit,
+    onPastePassphrase: () -> Unit,
 ) {
     Text(
         text = "Способ входа",
@@ -211,6 +238,11 @@ private fun CredentialsForm(
             onValueChange = onPasswordChange,
             enabled = enabled,
             label = { Text("SSH-пароль") },
+            trailingIcon = if (state.password.isEmpty()) {
+                { PasteButton(enabled = enabled, onClick = onPastePassword) }
+            } else {
+                null
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
@@ -222,6 +254,11 @@ private fun CredentialsForm(
             onValueChange = onPassphraseChange,
             enabled = enabled,
             label = { Text("Passphrase ключа (если есть)") },
+            trailingIcon = if (state.privateKeyPassphrase.isEmpty()) {
+                { PasteButton(enabled = enabled, onClick = onPastePassphrase) }
+            } else {
+                null
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
@@ -245,6 +282,17 @@ private fun CredentialsForm(
             text = "Файл ключа используется один раз и не сохраняется приложением.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun PasteButton(enabled: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        Icon(
+            painterResource(R.drawable.ic_paste),
+            contentDescription = "Вставить",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

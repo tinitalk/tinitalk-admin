@@ -45,6 +45,10 @@ fun AdminApp(viewModel: AdminViewModel) {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = viewModel::tinitalkBinarySelected,
     )
+    val tinitalkUpdateBinaryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = viewModel::tinitalkUpdateBinarySelected,
+    )
 
     LaunchedEffect(state.notice) {
         state.notice?.let {
@@ -120,6 +124,7 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 serverConnectivity = state.serverConnectivity,
                                 initialSetup = state.initialSetup,
                                 binarySelection = state.binarySelection,
+                                tinitalkUpdate = state.tinitalkUpdate,
                                 serverOperationStartedAt = runningOperation?.startedAt
                                     ?.takeIf { runningOperation.serverId == server.id },
                                 serverOperationInProgress = runningOperation != null,
@@ -156,6 +161,21 @@ fun AdminApp(viewModel: AdminViewModel) {
                                 },
                                 onStartInitialSetup = {
                                     viewModel.startInitialSetup(server.id)
+                                },
+                                onOpenTiniTalkUpdate = {
+                                    viewModel.openTiniTalkUpdate(server.id)
+                                },
+                                onCloseTiniTalkUpdate = viewModel::closeTiniTalkUpdate,
+                                onChooseTiniTalkUpdateBinary = {
+                                    tinitalkUpdateBinaryPicker.launch(
+                                        arrayOf("application/octet-stream", "*/*"),
+                                    )
+                                },
+                                onStartTiniTalkUpdate = {
+                                    viewModel.startTiniTalkUpdate(server.id)
+                                },
+                                onRetryTiniTalkUpdate = {
+                                    viewModel.retryTiniTalkUpdate(server.id)
                                 },
                                 modifier = Modifier.fillMaxSize().systemBarsPadding(),
                         )

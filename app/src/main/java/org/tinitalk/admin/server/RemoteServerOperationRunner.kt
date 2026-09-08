@@ -46,6 +46,12 @@ enum class ServerOperationKind(
         scriptName = "start_tinitalk.sh",
         timeout = "2min",
     ),
+    UPDATE_TINITALK(
+        unitName = "tinitalk-admin-update-tinitalk.service",
+        scriptName = "update_tinitalk.sh",
+        timeout = "30min",
+        receivesStagingDirectory = true,
+    ),
 }
 
 data class RemoteOperationUpload(
@@ -63,6 +69,7 @@ data class RemoteServerOperation(
     val kind: ServerOperationKind,
     val state: RemoteOperationState,
     val elapsedMillis: Long,
+    val exitCode: Int?,
 )
 
 class RemoteServerOperationRunner(context: Context) {
@@ -141,8 +148,12 @@ class RemoteServerOperationRunner(context: Context) {
         }
     }
 
-    suspend fun find(connection: SshConnection, login: String): RemoteServerOperation? {
-        val found = ServerOperationKind.entries.mapNotNull { status(connection, login, it) }
+    suspend fun find(
+        connection: SshConnection,
+        login: String,
+        kinds: Collection<ServerOperationKind> = ServerOperationKind.entries,
+    ): RemoteServerOperation? {
+        val found = kinds.mapNotNull { status(connection, login, it) }
         return found.firstOrNull { it.state == RemoteOperationState.RUNNING } ?: found.firstOrNull()
     }
 
@@ -184,7 +195,8 @@ class RemoteServerOperationRunner(context: Context) {
         } else {
             0
         }
-        return RemoteServerOperation(kind, state, elapsedMillis)
+        val exitCode = values["ExecMainStatus"]?.toIntOrNull()
+        return RemoteServerOperation(kind, state, elapsedMillis, exitCode)
     }
 
     suspend fun acknowledge(

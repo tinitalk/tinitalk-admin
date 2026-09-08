@@ -73,6 +73,7 @@ fun ServerDetailsScreen(
     serverConnectivity: ServerConnectivityUiState,
     initialSetup: InitialSetupUiState,
     binarySelection: TiniTalkBinaryState,
+    tinitalkUpdate: TiniTalkUpdateUiState,
     serverOperationStartedAt: Long?,
     serverOperationInProgress: Boolean,
     onBack: () -> Unit,
@@ -89,6 +90,11 @@ fun ServerDetailsScreen(
     onCloseTiniTalkBinary: () -> Unit,
     onChooseTiniTalkBinary: () -> Unit,
     onStartInitialSetup: () -> Unit,
+    onOpenTiniTalkUpdate: () -> Unit,
+    onCloseTiniTalkUpdate: () -> Unit,
+    onChooseTiniTalkUpdateBinary: () -> Unit,
+    onStartTiniTalkUpdate: () -> Unit,
+    onRetryTiniTalkUpdate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var renameDialogVisible by rememberSaveable(server.id) { mutableStateOf(false) }
@@ -110,7 +116,11 @@ fun ServerDetailsScreen(
     val actionsEnabled = !serverConnectivity.inProgress &&
         !serverOperationInProgress &&
         !setupBusy &&
-        !hostKeyChanged
+        !hostKeyChanged &&
+        tinitalkUpdate.mode !in setOf(
+            TiniTalkUpdateUiMode.RUNNING,
+            TiniTalkUpdateUiMode.FAILED,
+        )
 
     LaunchedEffect(renameDialogVisible) {
         if (renameDialogVisible) {
@@ -163,6 +173,7 @@ fun ServerDetailsScreen(
                             onDismissRequest = { menuExpanded = false },
                         ) {
                             DropdownMenuItem(
+                                enabled = actionsEnabled,
                                 text = {
                                     Text(
                                         text = "Удалить из приложения",
@@ -270,6 +281,28 @@ fun ServerDetailsScreen(
                     iconResource = R.drawable.ic_contacts,
                     onClick = onOpenUsers,
                 )
+                when (tinitalkUpdate.mode) {
+                    TiniTalkUpdateUiMode.RUNNING -> TiniTalkUpdateProgress(
+                        elapsedSeconds = serverOperationElapsedSeconds,
+                    )
+                    TiniTalkUpdateUiMode.FAILED -> TiniTalkUpdateFailure(
+                        message = tinitalkUpdate.errorMessage
+                            ?: "Не удалось получить состояние обновления",
+                        enabled = !serverConnectivity.inProgress &&
+                            !serverOperationInProgress &&
+                            !setupBusy &&
+                            !hostKeyChanged,
+                        onRetry = onRetryTiniTalkUpdate,
+                    )
+                    TiniTalkUpdateUiMode.IDLE,
+                    TiniTalkUpdateUiMode.SELECTING,
+                    -> SetupActionButton(
+                        label = "Обновить TiniTalk",
+                        enabled = actionsEnabled,
+                        iconResource = R.drawable.ic_update,
+                        onClick = onOpenTiniTalkUpdate,
+                    )
+                }
             }
         }
     }
@@ -295,6 +328,39 @@ fun ServerDetailsScreen(
             },
             dismissButton = {
                 TextButton(onClick = onCloseTiniTalkBinary) {
+                    Text("Отмена")
+                }
+            },
+        )
+    }
+
+    if (tinitalkUpdate.mode == TiniTalkUpdateUiMode.SELECTING) {
+        AlertDialog(
+            onDismissRequest = onCloseTiniTalkUpdate,
+            title = { Text("Обновить TiniTalk") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        "Во время обновления сервис ненадолго остановится. " +
+                            "Перед заменой будут сохранены текущий бинарник и база данных.",
+                    )
+                    FileSelectionButton(
+                        label = "Новый бинарник TiniTalk Server",
+                        fileName = tinitalkUpdate.binaryName,
+                        onClick = onChooseTiniTalkUpdateBinary,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onStartTiniTalkUpdate,
+                    enabled = tinitalkUpdate.ready,
+                ) {
+                    Text("Обновить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onCloseTiniTalkUpdate) {
                     Text("Отмена")
                 }
             },
@@ -857,6 +923,68 @@ private fun SetupActionButton(
             } else {
                 Text(label)
             }
+        }
+    }
+}
+
+@Composable
+private fun TiniTalkUpdateProgress(elapsedSeconds: Long) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.78f),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(18.dp),
+        ) {
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(24.dp),
+            )
+            Text(
+                text = "Обновляем TiniTalk · ${elapsedSeconds.asElapsedTime()}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TiniTalkUpdateFailure(
+    message: String,
+    enabled: Boolean,
+    onRetry: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.78f),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(18.dp),
+        ) {
+            Text(
+                text = message,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            SetupActionButton(
+                label = "Проверить обновление",
+                enabled = enabled,
+                onClick = onRetry,
+            )
         }
     }
 }

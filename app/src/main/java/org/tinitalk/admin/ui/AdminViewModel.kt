@@ -11,10 +11,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import org.tinitalk.admin.data.ServerStore
 import org.tinitalk.admin.data.ServerSetupStore
+import org.tinitalk.admin.data.ServerUpdateStore
 import org.tinitalk.admin.data.SharedPreferencesServerStore
 import org.tinitalk.admin.data.SharedPreferencesServerSetupStore
+import org.tinitalk.admin.data.SharedPreferencesServerUpdateStore
 import org.tinitalk.admin.data.StoredServerSetup
 import org.tinitalk.admin.data.StoredServerSetupStatus
+import org.tinitalk.admin.data.StoredServerUpdate
 import org.tinitalk.admin.data.forRetry
 import org.tinitalk.admin.io.InputTooLargeException
 import org.tinitalk.admin.io.readBytesLimited
@@ -122,6 +125,7 @@ data class AdminUiState(
     val addServerUser: AddServerUserState = AddServerUserState(),
     val serverUserDetails: ServerUserDetailsUiState = ServerUserDetailsUiState(),
     val binarySelection: TiniTalkBinaryState = TiniTalkBinaryState(),
+    val tinitalkUpdate: TiniTalkUpdateUiState = TiniTalkUpdateUiState(),
     val notice: String? = null,
 )
 
@@ -191,6 +195,24 @@ data class TiniTalkBinaryState(
         get() = binaryName != null
 }
 
+enum class TiniTalkUpdateUiMode {
+    IDLE,
+    SELECTING,
+    RUNNING,
+    FAILED,
+}
+
+data class TiniTalkUpdateUiState(
+    val mode: TiniTalkUpdateUiMode = TiniTalkUpdateUiMode.IDLE,
+    val binaryName: String? = null,
+    val errorMessage: String? = null,
+) {
+    val ready: Boolean
+        get() = binaryName != null
+}
+
+private class TiniTalkUpdateFileException(cause: Exception) : Exception(cause)
+
 data class RunningServerOperation(
     val serverId: String,
     val kind: ServerOperationKind,
@@ -233,6 +255,7 @@ class AdminViewModel(
     private val contentResolver: ContentResolver,
     private val serverStore: ServerStore,
     private val serverSetupStore: ServerSetupStore,
+    private val serverUpdateStore: ServerUpdateStore,
     private val endpointResolver: EndpointResolver,
     private val sshAccessChecker: SshAccessChecker,
     private val importedKeyReader: ImportedKeyReader,
@@ -269,6 +292,7 @@ class AdminViewModel(
     private var pendingHostKey: PinnedHostKey? = null
     private var selectedPrivateKeyUri: Uri? = null
     private var selectedTiniTalkBinaryUri: Uri? = null
+    private var selectedTiniTalkUpdateUri: Uri? = null
 
     fun openAddServer() {
         invalidateOperation()
@@ -302,6 +326,8 @@ class AdminViewModel(
         serverConnectivityJob?.cancel()
         serverConnectivityJob = null
         val savedSetup = runCatching { serverSetupStore.get(serverId) }.getOrNull()
+        val savedUpdate = runCatching { serverUpdateStore.get(serverId) }.getOrNull()
+            ?.takeIf { savedSetup?.configured == true }
         val setupState = when {
             savedSetup?.hostKeyChanged == true -> InitialSetupUiState(
                 mode = InitialSetupUiMode.SSH_HOST_KEY_CHANGED,
@@ -320,10 +346,24 @@ class AdminViewModel(
                 route = AdminRoute.ServerDetails(serverId),
                 serverConnectivity = ServerConnectivityUiState(),
                 initialSetup = setupState,
+                tinitalkUpdate = if (savedUpdate == null) {
+                    TiniTalkUpdateUiState()
+                } else {
+                    TiniTalkUpdateUiState(mode = TiniTalkUpdateUiMode.RUNNING)
+                },
+                serverOperation = savedUpdate?.let {
+                    RunningServerOperation(
+                        serverId = serverId,
+                        kind = ServerOperationKind.UPDATE_TINITALK,
+                        startedAt = SystemClock.elapsedRealtime() -
+                            (System.currentTimeMillis() - it.startedAtEpochMillis).coerceAtLeast(0),
+                    )
+                } ?: it.serverOperation,
                 notice = null,
             )
         }
         if (savedSetup?.inProgress == true) resumeInitialSetup(serverId)
+        if (savedUpdate != null) resumeTiniTalkUpdate(serverId)
     }
 
     fun closeServer() {
@@ -342,6 +382,7 @@ class AdminViewModel(
         renameServerUserJob?.cancel()
         renameServerUserJob = null
         discardSelectedTiniTalkBinary()
+        discardSelectedTiniTalkUpdate()
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerList,
@@ -350,6 +391,7 @@ class AdminViewModel(
                 addServerUser = AddServerUserState(),
                 serverUserDetails = ServerUserDetailsUiState(),
                 binarySelection = TiniTalkBinaryState(),
+                tinitalkUpdate = TiniTalkUpdateUiState(),
                 initialSetup = InitialSetupUiState(),
             )
         }
@@ -1122,7 +1164,11 @@ class AdminViewModel(
             try {
                 val connection = connectToServer(server)
                 try {
-                    val remote = remoteOperationRunner.find(connection, server.sshLogin)
+                    val remote = remoteOperationRunner.find(
+                        connection,
+                        server.sshLogin,
+                        InitialSetupStep.entries.map(InitialSetupStep::operationKind),
+                    )
                     if (remote?.state == RemoteOperationState.RUNNING) {
                         val step = InitialSetupStep.from(remote.kind)
                         val setup = StoredServerSetup(
@@ -1404,6 +1450,7 @@ class AdminViewModel(
         connection: SshConnection,
         server: ServerRecord,
         initial: RemoteServerOperation,
+        acknowledge: Boolean = true,
     ): RemoteServerOperation {
         var remote = initial
         val startedAt = SystemClock.elapsedRealtime() - initial.elapsedMillis
@@ -1421,7 +1468,9 @@ class AdminViewModel(
             remote = remoteOperationRunner.status(connection, server.sshLogin, remote.kind)
                 ?: error("Remote operation disappeared")
         }
-        remoteOperationRunner.acknowledge(connection, server.sshLogin, remote.kind)
+        if (acknowledge) {
+            remoteOperationRunner.acknowledge(connection, server.sshLogin, remote.kind)
+        }
         return remote
     }
 
@@ -1520,6 +1569,248 @@ class AdminViewModel(
         selectedTiniTalkBinaryUri = null
     }
 
+    fun openTiniTalkUpdate(serverId: String) {
+        val current = mutableState.value
+        if (
+            current.route != AdminRoute.ServerDetails(serverId) ||
+            current.initialSetup.mode != InitialSetupUiMode.CONFIGURED ||
+            current.serverOperation != null ||
+            serverOperationJob?.isActive == true ||
+            runCatching { serverUpdateStore.get(serverId) }.getOrNull() != null
+        ) return
+        discardSelectedTiniTalkUpdate()
+        mutableState.update {
+            it.copy(
+                tinitalkUpdate = TiniTalkUpdateUiState(TiniTalkUpdateUiMode.SELECTING),
+                notice = null,
+            )
+        }
+    }
+
+    fun closeTiniTalkUpdate() {
+        if (mutableState.value.tinitalkUpdate.mode != TiniTalkUpdateUiMode.SELECTING) return
+        discardSelectedTiniTalkUpdate()
+        mutableState.update { it.copy(tinitalkUpdate = TiniTalkUpdateUiState()) }
+    }
+
+    fun tinitalkUpdateBinarySelected(uri: Uri?) {
+        if (uri == null || mutableState.value.tinitalkUpdate.mode != TiniTalkUpdateUiMode.SELECTING) {
+            return
+        }
+        if (!preserveReadAccess(uri)) return
+        selectedTiniTalkUpdateUri?.takeIf { it != uri }?.let(::releaseReadAccess)
+        selectedTiniTalkUpdateUri = uri
+        mutableState.update {
+            it.copy(
+                tinitalkUpdate = it.tinitalkUpdate.copy(binaryName = displayName(uri)),
+            )
+        }
+    }
+
+    fun startTiniTalkUpdate(serverId: String) {
+        val current = mutableState.value
+        if (
+            current.route != AdminRoute.ServerDetails(serverId) ||
+            current.initialSetup.mode != InitialSetupUiMode.CONFIGURED ||
+            current.tinitalkUpdate.mode != TiniTalkUpdateUiMode.SELECTING ||
+            current.serverOperation != null ||
+            serverOperationJob?.isActive == true
+        ) return
+        val binaryUri = selectedTiniTalkUpdateUri ?: return
+        val startedAtEpochMillis = System.currentTimeMillis()
+        val update = StoredServerUpdate(
+            startedAtEpochMillis = startedAtEpochMillis,
+            binaryUri = binaryUri.toString(),
+        )
+        try {
+            serverUpdateStore.put(serverId, update)
+        } catch (_: Exception) {
+            mutableState.update {
+                it.copy(notice = "Не удалось сохранить состояние обновления")
+            }
+            return
+        }
+        clearSelectedTiniTalkUpdate()
+        mutableState.update {
+            it.copy(
+                tinitalkUpdate = TiniTalkUpdateUiState(TiniTalkUpdateUiMode.RUNNING),
+                serverOperation = RunningServerOperation(
+                    serverId = serverId,
+                    kind = ServerOperationKind.UPDATE_TINITALK,
+                    startedAt = SystemClock.elapsedRealtime(),
+                ),
+                notice = null,
+            )
+        }
+        resumeTiniTalkUpdate(serverId)
+    }
+
+    fun retryTiniTalkUpdate(serverId: String) {
+        if (
+            mutableState.value.route != AdminRoute.ServerDetails(serverId) ||
+            mutableState.value.tinitalkUpdate.mode != TiniTalkUpdateUiMode.FAILED ||
+            serverOperationJob?.isActive == true
+        ) return
+        mutableState.update {
+            it.copy(
+                tinitalkUpdate = TiniTalkUpdateUiState(TiniTalkUpdateUiMode.RUNNING),
+                notice = null,
+            )
+        }
+        resumeTiniTalkUpdate(serverId)
+    }
+
+    private fun resumeTiniTalkUpdate(serverId: String) {
+        if (serverOperationJob?.isActive == true) return
+        val server = mutableState.value.servers.firstOrNull { it.id == serverId } ?: return
+        val update = serverUpdateStore.get(serverId) ?: return
+        serverOperationJob = viewModelScope.launch {
+            var uploads = emptyList<RemoteOperationUpload>()
+            try {
+                val connection = connectToServer(server)
+                try {
+                    var remote = remoteOperationRunner.status(
+                        connection,
+                        server.sshLogin,
+                        ServerOperationKind.UPDATE_TINITALK,
+                    )
+                    if (remote == null) {
+                        uploads = readTiniTalkUpdateUpload(update)
+                        remote = remoteOperationRunner.start(
+                            connection = connection,
+                            login = server.sshLogin,
+                            kind = ServerOperationKind.UPDATE_TINITALK,
+                            arguments = listOf(server.enteredAddress),
+                            uploads = uploads,
+                        )
+                    }
+                    remote = monitorInitialSetupOperation(
+                        connection = connection,
+                        server = server,
+                        initial = remote,
+                        acknowledge = false,
+                    )
+                    finishTiniTalkUpdate(serverId, update)
+                    remoteOperationRunner.acknowledge(
+                        connection,
+                        server.sshLogin,
+                        ServerOperationKind.UPDATE_TINITALK,
+                    )
+                    if (remote.state == RemoteOperationState.SUCCEEDED) {
+                        mutableState.update { state ->
+                            state.copy(
+                                serverOperation = null,
+                                tinitalkUpdate = if (
+                                    state.route == AdminRoute.ServerDetails(serverId)
+                                ) {
+                                    TiniTalkUpdateUiState()
+                                } else {
+                                    state.tinitalkUpdate
+                                },
+                                notice = "TiniTalk обновлён",
+                            )
+                        }
+                    } else {
+                        mutableState.update { state ->
+                            state.copy(
+                                serverOperation = null,
+                                tinitalkUpdate = if (
+                                    state.route == AdminRoute.ServerDetails(serverId)
+                                ) {
+                                    TiniTalkUpdateUiState()
+                                } else {
+                                    state.tinitalkUpdate
+                                },
+                                notice = updateFailureMessage(remote.exitCode),
+                            )
+                        }
+                    }
+                } finally {
+                    runCatching { connection.close() }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: InputTooLargeException) {
+                finishTiniTalkUpdate(serverId, update)
+                mutableState.update { state ->
+                    state.copy(
+                        serverOperation = null,
+                        tinitalkUpdate = if (
+                            state.route == AdminRoute.ServerDetails(serverId)
+                        ) {
+                            TiniTalkUpdateUiState()
+                        } else {
+                            state.tinitalkUpdate
+                        },
+                        notice = setupErrorMessage(error),
+                    )
+                }
+            } catch (_: TiniTalkUpdateFileException) {
+                finishTiniTalkUpdate(serverId, update)
+                mutableState.update { state ->
+                    state.copy(
+                        serverOperation = null,
+                        tinitalkUpdate = if (
+                            state.route == AdminRoute.ServerDetails(serverId)
+                        ) {
+                            TiniTalkUpdateUiState()
+                        } else {
+                            state.tinitalkUpdate
+                        },
+                        notice = "Не удалось прочитать выбранный бинарник. Выберите файл ещё раз",
+                    )
+                }
+            } catch (error: Exception) {
+                if (error !is SshFailure.HostKeyChanged) {
+                    mutableState.update { state ->
+                        state.copy(
+                            serverOperation = null,
+                            tinitalkUpdate = if (
+                                state.route == AdminRoute.ServerDetails(serverId)
+                            ) {
+                                TiniTalkUpdateUiState(
+                                    mode = TiniTalkUpdateUiMode.FAILED,
+                                    errorMessage = updateConnectionErrorMessage(error),
+                                )
+                            } else {
+                                state.tinitalkUpdate
+                            },
+                        )
+                    }
+                }
+            } finally {
+                uploads.forEach { it.bytes.fill(0) }
+                serverOperationJob = null
+            }
+        }
+    }
+
+    private suspend fun readTiniTalkUpdateUpload(
+        update: StoredServerUpdate,
+    ): List<RemoteOperationUpload> = withContext(Dispatchers.IO) {
+        try {
+            listOf(readSetupUpload(update.binaryUri, "tinitalk"))
+        } catch (error: InputTooLargeException) {
+            throw error
+        } catch (error: Exception) {
+            throw TiniTalkUpdateFileException(error)
+        }
+    }
+
+    private fun finishTiniTalkUpdate(serverId: String, update: StoredServerUpdate) {
+        serverUpdateStore.remove(serverId)
+        releaseReadAccess(Uri.parse(update.binaryUri))
+    }
+
+    private fun discardSelectedTiniTalkUpdate() {
+        selectedTiniTalkUpdateUri?.let(::releaseReadAccess)
+        clearSelectedTiniTalkUpdate()
+    }
+
+    private fun clearSelectedTiniTalkUpdate() {
+        selectedTiniTalkUpdateUri = null
+    }
+
     fun renameServer(serverId: String, value: String) {
         if (mutableState.value.servers.none { it.id == serverId }) return
         val displayName = value.trim()
@@ -1537,6 +1828,10 @@ class AdminViewModel(
                 withContext(Dispatchers.IO) {
                     serverSetupStore.get(serverId)?.let(::releaseSetupBinary)
                     serverSetupStore.remove(serverId)
+                    serverUpdateStore.get(serverId)?.let {
+                        releaseReadAccess(Uri.parse(it.binaryUri))
+                    }
+                    serverUpdateStore.remove(serverId)
                     identityStore.delete(server.keystoreAlias)
                     serverStore.remove(serverId)
                     serverStore.list()
@@ -1610,6 +1905,11 @@ class AdminViewModel(
 
     private fun markHostKeyChanged(server: ServerRecord, observedHostKey: PinnedHostKey) {
         serverSetupStore.get(server.id)?.let(::releaseSetupBinary)
+        serverUpdateStore.get(server.id)?.let {
+            releaseReadAccess(Uri.parse(it.binaryUri))
+        }
+        runCatching { serverUpdateStore.remove(server.id) }
+        discardSelectedTiniTalkUpdate()
         serverSetupStore.put(
             server.id,
             StoredServerSetup(
@@ -1627,6 +1927,7 @@ class AdminViewModel(
                 serverUsers = ServerUsersUiState(),
                 addServerUser = AddServerUserState(),
                 serverUserDetails = ServerUserDetailsUiState(),
+                tinitalkUpdate = TiniTalkUpdateUiState(),
                 initialSetup = InitialSetupUiState(
                     mode = InitialSetupUiMode.SSH_HOST_KEY_CHANGED,
                     observedFingerprint = observedHostKey.sha256Fingerprint,
@@ -1660,6 +1961,21 @@ class AdminViewModel(
         is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
         is SshFailure.Timeout -> "Сервер не ответил вовремя"
         else -> "Не удалось проверить или продолжить настройку сервера"
+    }
+
+    private fun updateConnectionErrorMessage(error: Exception): String = when (error) {
+        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
+        is SshFailure.Timeout -> "Сервер не ответил вовремя. Обновление может ещё выполняться"
+        else -> "Не удалось запустить или проверить обновление"
+    }
+
+    private fun updateFailureMessage(exitCode: Int?): String = when (exitCode) {
+        20 -> "Недостаточно места для резервной копии и обновления"
+        30 -> "Выбранный бинарник не подходит для этого сервера"
+        40 -> "Не удалось создать резервную копию. Сервер запущен без изменений"
+        50 -> "Новая версия не запустилась. Предыдущая версия восстановлена"
+        60 -> "Не удалось обновить TiniTalk и автоматически восстановить предыдущую версию"
+        else -> "Не удалось обновить TiniTalk"
     }
 
     fun updateDisplayName(value: String) = updateAddServerForm { copy(displayName = value) }
@@ -2076,6 +2392,7 @@ class AdminViewModel(
                         contentResolver = applicationContext.contentResolver,
                         serverStore = SharedPreferencesServerStore(applicationContext),
                         serverSetupStore = SharedPreferencesServerSetupStore(applicationContext),
+                        serverUpdateStore = SharedPreferencesServerUpdateStore(applicationContext),
                         endpointResolver = EndpointResolver(),
                         sshAccessChecker = sshAccessChecker,
                         importedKeyReader = ImportedKeyReader(applicationContext.contentResolver),
@@ -2105,6 +2422,7 @@ private fun ServerOperationKind.failureMessage(): String = when (this) {
     ServerOperationKind.PREPARE_TINITALK -> "Не удалось подготовить TiniTalk"
     ServerOperationKind.INSTALL_TINITALK_BINARY -> "Не удалось загрузить бинарник TiniTalk"
     ServerOperationKind.START_TINITALK -> "Не удалось запустить TiniTalk"
+    ServerOperationKind.UPDATE_TINITALK -> "Не удалось обновить TiniTalk"
 }
 
 private fun StoredServerSetup.toUiState(

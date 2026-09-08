@@ -13,7 +13,8 @@ print_status() {
 }
 
 system_packages_ready() {
-    command -v logrotate >/dev/null 2>&1 &&
+    command -v curl >/dev/null 2>&1 &&
+        command -v logrotate >/dev/null 2>&1 &&
         command -v snap >/dev/null 2>&1 &&
         command -v sysctl >/dev/null 2>&1 &&
         command -v ufw >/dev/null 2>&1 &&

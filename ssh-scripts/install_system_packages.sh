@@ -4,7 +4,7 @@ set -eu
 # Install required system packages.
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    logrotate procps snapd systemd-timesyncd ufw
+    curl logrotate procps snapd systemd-timesyncd ufw
 
 # Enable automatic time synchronization.
 systemctl enable --now systemd-timesyncd

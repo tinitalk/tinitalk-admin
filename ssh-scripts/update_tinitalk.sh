@@ -52,7 +52,14 @@ restore_on_failure() {
     fi
 
     if [ "$service_stopped" = true ]; then
-        systemctl stop "$service" >/dev/null 2>&1 || true
+        if ! systemctl stop "$service"; then
+            printf 'rollback stopped: could not stop %s\n' "$service" >&2
+            exit 60
+        fi
+        if systemctl is-active --quiet "$service"; then
+            printf 'rollback stopped: %s is still active\n' "$service" >&2
+            exit 60
+        fi
 
         if [ "$replacement_started" = true ] && [ "$backup_ready" = true ]; then
             if ! install -m 0755 "$backup_dir/tinitalk" "$binary" ||
@@ -93,16 +100,19 @@ if ! command -v curl >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y curl || exit 10
 fi
 
-# Check space for one previous binary and database, with a safety margin.
+# Check space for one previous binary and database, including its WAL,
+# with a safety margin.
 install -d -o root -g tinitalk -m 0710 "$backup_root"
 database_kib=$(du -k "$database" | awk '{print $1}')
+wal_kib=$(du -k "$database-wal" 2>/dev/null | awk '{print $1}')
+[ -n "$wal_kib" ] || wal_kib=0
 binary_kib=$(du -k "$binary" | awk '{print $1}')
 previous_kib=$(du -sk "$backup_dir" 2>/dev/null | awk '{print $1}')
 [ -n "$previous_kib" ] || previous_kib=0
 
 backup_free_kib=$(df -Pk "$backup_root" | awk 'END {print $4}')
 backup_free_kib=$((backup_free_kib + previous_kib))
-backup_size_kib=$((database_kib + binary_kib))
+backup_size_kib=$((database_kib + wal_kib + binary_kib))
 safety_kib=$((backup_size_kib / 5))
 if [ "$safety_kib" -lt 65536 ]; then
     safety_kib=65536

@@ -87,7 +87,13 @@ fun AddServerScreen(
             onAddressChange = onAddressChange,
             onPortChange = onPortChange,
             onLoginChange = onLoginChange,
-            onPasteAddress = { clipboardText()?.let(onAddressChange) },
+            onPasteAddress = {
+                clipboardText()
+                    ?.lineSequence()
+                    ?.firstOrNull { it.isNotBlank() }
+                    ?.trim()
+                    ?.let(onAddressChange)
+            },
         )
         CredentialsForm(
             state = state,

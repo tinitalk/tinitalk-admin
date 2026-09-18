@@ -32,6 +32,7 @@ import org.tinitalk.admin.server.InitialSetupEvidence
 import org.tinitalk.admin.server.InitialSetupInspector
 import org.tinitalk.admin.server.InitialSetupStep
 import org.tinitalk.admin.server.RemoteOperationState
+import org.tinitalk.admin.server.RemoteOperationStatusException
 import org.tinitalk.admin.server.RemoteOperationUpload
 import org.tinitalk.admin.server.RemoteServerOperation
 import org.tinitalk.admin.server.RemoteServerOperationRunner
@@ -1163,8 +1164,7 @@ class AdminViewModel(
         serverOperationJob = viewModelScope.launch {
             var shouldContinue = false
             try {
-                val connection = connectToServer(server)
-                try {
+                withInitialSetupConnectionRetry(server) { connection ->
                     val remote = remoteOperationRunner.find(
                         connection,
                         server.sshLogin,
@@ -1201,8 +1201,6 @@ class AdminViewModel(
                             }
                         }
                     }
-                } finally {
-                    runCatching { connection.close() }
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -1323,11 +1321,14 @@ class AdminViewModel(
         mutableState.update { it.copy(initialSetup = setup.toUiState(), notice = null) }
         serverOperationJob = viewModelScope.launch {
             try {
-                val connection = connectToServer(server)
-                try {
-                    runInitialSetup(connection, server, setup)
-                } finally {
-                    runCatching { connection.close() }
+                withInitialSetupConnectionRetry(server) { connection ->
+                    val currentSetup = serverSetupStore.get(serverId)
+                        ?.takeIf(StoredServerSetup::inProgress)
+                        ?: setup
+                    mutableState.update {
+                        it.copy(initialSetup = currentSetup.toUiState(), notice = null)
+                    }
+                    runInitialSetup(connection, server, currentSetup)
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -1351,6 +1352,34 @@ class AdminViewModel(
             }
         }
     }
+
+    private suspend fun <T> withInitialSetupConnectionRetry(
+        server: ServerRecord,
+        block: suspend (SshConnection) -> T,
+    ): T {
+        var retryIndex = 0
+        while (true) {
+            try {
+                val connection = connectToServer(server)
+                try {
+                    return block(connection)
+                } finally {
+                    runCatching { connection.close() }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (!error.isTransientSshFailure() || retryIndex >= SETUP_RETRY_DELAYS.size) {
+                    throw error
+                }
+                delay(SETUP_RETRY_DELAYS[retryIndex])
+                retryIndex++
+            }
+        }
+    }
+
+    private fun Exception.isTransientSshFailure(): Boolean =
+        this is SshFailure.Timeout || this is SshFailure.Transport
 
     private suspend fun runInitialSetup(
         connection: SshConnection,
@@ -1957,10 +1986,12 @@ class AdminViewModel(
     }
 
     private fun setupErrorMessage(error: Exception): String = when (error) {
+        is RemoteOperationStatusException -> "Не удалось получить статус операции на сервере. Повторите проверку"
         is InputTooLargeException -> "Бинарник превышает ${MAX_BINARY_BYTES / (1024 * 1024)} МиБ. Выберите файл меньшего размера"
         is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
         is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
         is SshFailure.Timeout -> "Сервер не ответил вовремя"
+        is SshFailure.Transport -> "SSH-соединение прервано. Не удалось подключиться повторно"
         else -> "Не удалось проверить или продолжить настройку сервера"
     }
 
@@ -2380,6 +2411,7 @@ class AdminViewModel(
         private const val SSH_CHECK_COMMAND =
             "LC_ALL=C; export LC_ALL; id -un && hostname && uptime -p"
         private const val REMOTE_OPERATION_POLL_MILLIS = 1_000L
+        private val SETUP_RETRY_DELAYS = longArrayOf(2_000L, 5_000L, 10_000L)
 
         fun factory(context: Context): ViewModelProvider.Factory {
             val applicationContext = context.applicationContext

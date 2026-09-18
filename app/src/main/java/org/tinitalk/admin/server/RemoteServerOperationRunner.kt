@@ -1,6 +1,7 @@
 package org.tinitalk.admin.server
 
 import android.content.Context
+import android.util.Log
 import org.tinitalk.admin.ssh.SshConnection
 import kotlinx.coroutines.delay
 
@@ -98,6 +99,7 @@ class RemoteServerOperationRunner(context: Context) {
         val directory = staging.stdout.trim()
         check(STAGING_DIRECTORY.matches(directory)) { "Unsafe operation staging directory" }
 
+        var launchAttempted = false
         try {
             val wrapperPath = "$directory/$WRAPPER_SCRIPT"
             val scriptPath = "$directory/${kind.scriptName}"
@@ -128,10 +130,10 @@ class RemoteServerOperationRunner(context: Context) {
                 }
                 arguments.forEach { append(' ').append(it.shellQuote()) }
             }
+            launchAttempted = true
             val result = connection.exec(privileged(login, command))
             if (result.exitCode != 0) {
                 status(connection, login, kind)?.let { existing ->
-                    connection.exec("LC_ALL=C rm -rf -- ${directory.shellQuote()}")
                     return existing
                 }
                 error("Failed to start remote server operation")
@@ -143,7 +145,10 @@ class RemoteServerOperationRunner(context: Context) {
             }
             error("Remote server operation did not appear")
         } catch (error: Throwable) {
-            connection.exec("LC_ALL=C rm -rf -- ${directory.shellQuote()}")
+            // Once submitted, the service may still be using these files.
+            if (!launchAttempted) {
+                runCatching { connection.exec("LC_ALL=C rm -rf -- ${directory.shellQuote()}") }
+            }
             throw error
         }
     }
@@ -171,32 +176,13 @@ class RemoteServerOperationRunner(context: Context) {
             append(" --property=Result")
             append(" --property=ExecMainStatus")
             append(" --property=ExecMainStartTimestampMonotonic")
-            append("; awk '{printf \"ServerUptimeMonotonicUSec=%.0f\\n\", \$1 * 1000000}' /proc/uptime")
+            append(" && awk '{printf \"ServerUptimeMonotonicUSec=%.0f\\n\", \$1 * 1000000}' /proc/uptime")
         }
-        val result = connection.exec(privileged(login, command))
-        check(result.exitCode == 0) { "Failed to read remote operation status" }
-        val values = result.stdout.lineSequence()
-            .map(String::trim)
-            .filter { it.contains('=') }
-            .associate { line -> line.substringBefore('=') to line.substringAfter('=') }
-        if (values["LoadState"] != "loaded") return null
-
-        val state = when {
-            values["ActiveState"] == "active" && values["SubState"] == "exited" -> {
-                RemoteOperationState.SUCCEEDED
-            }
-            values["ActiveState"] == "failed" -> RemoteOperationState.FAILED
-            else -> RemoteOperationState.RUNNING
-        }
-        val startedAt = values["ExecMainStartTimestampMonotonic"]?.toLongOrNull() ?: 0
-        val serverUptime = values["ServerUptimeMonotonicUSec"]?.toLongOrNull() ?: startedAt
-        val elapsedMillis = if (startedAt > 0 && serverUptime >= startedAt) {
-            (serverUptime - startedAt) / 1_000
-        } else {
-            0
-        }
-        val exitCode = values["ExecMainStatus"]?.toIntOrNull()
-        return RemoteServerOperation(kind, state, elapsedMillis, exitCode)
+        return readRemoteOperationStatus(
+            kind = kind,
+            query = { connection.exec(privileged(login, command)) },
+            onFailure = { Log.w("TiniTalkSetup", it.message.orEmpty()) },
+        )
     }
 
     suspend fun acknowledge(

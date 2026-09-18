@@ -10,7 +10,12 @@ data class ServerUser(
 
 data class AddedServerUser(
     val user: ServerUser,
-    val token: String,
+    val credential: ServerUserCredential,
+)
+
+data class ServerUserCredential(
+    val value: String,
+    val temporary: Boolean,
 )
 
 class ServerUserAlreadyExistsException : IllegalStateException()
@@ -71,10 +76,10 @@ class ServerUsersReader {
         check(result.exitCode == 0 && result.stderr.isBlank()) {
             "TiniTalk user add command failed"
         }
-        val token = parseTokenOutput(result.stdout, login)
+        val credential = parseCredentialOutput(result.stdout, login)
         return AddedServerUser(
             user = ServerUser(login = login, displayName = displayName, disabled = false),
-            token = token,
+            credential = credential,
         )
     }
 
@@ -82,7 +87,7 @@ class ServerUsersReader {
         connection: SshConnection,
         sshLogin: String,
         login: String,
-    ): String {
+    ): ServerUserCredential {
         val executable = if (sshLogin == "root") {
             "/usr/local/bin/tinitalk"
         } else {
@@ -110,7 +115,7 @@ class ServerUsersReader {
         check(result.exitCode == 0 && result.stderr.isBlank()) {
             "TiniTalk user rotate-token command failed"
         }
-        return parseTokenOutput(result.stdout, login)
+        return parseCredentialOutput(result.stdout, login)
     }
 
     suspend fun delete(connection: SshConnection, sshLogin: String, login: String) {
@@ -249,15 +254,28 @@ class ServerUsersReader {
         }
     }
 
-    private fun parseTokenOutput(output: String, login: String): String {
+    private fun parseCredentialOutput(output: String, login: String): ServerUserCredential {
         val lines = output.lineSequence().filter(String::isNotEmpty).toList()
-        check(lines.size == 2 && lines[0] == "login: $login" && lines[1].startsWith("token: ")) {
-            "Invalid TiniTalk user token output"
+        check(lines.size == 2 && lines[0] == "login: $login") {
+            "Invalid TiniTalk user credential output"
         }
-        return lines[1].removePrefix("token: ").also { token ->
-            check(token.length == TOKEN_LENGTH && token.all(::isTokenCharacter)) {
-                "Invalid TiniTalk user token"
+
+        return when {
+            lines[1].startsWith("password: ") -> {
+                val password = lines[1].removePrefix("password: ")
+                check(password.isNotEmpty() && password.none(Char::isISOControl)) {
+                    "Invalid TiniTalk temporary password"
+                }
+                ServerUserCredential(value = password, temporary = true)
             }
+            lines[1].startsWith("token: ") -> {
+                val token = lines[1].removePrefix("token: ")
+                check(token.length == TOKEN_LENGTH && token.all(::isTokenCharacter)) {
+                    "Invalid TiniTalk user token"
+                }
+                ServerUserCredential(value = token, temporary = false)
+            }
+            else -> error("Invalid TiniTalk user credential output")
         }
     }
 

@@ -44,6 +44,7 @@ import org.tinitalk.admin.server.ServerUserAlreadyExistsException
 import org.tinitalk.admin.server.ServerUserCommandUnavailableException
 import org.tinitalk.admin.server.ServerUserNotFoundException
 import org.tinitalk.admin.server.ServerUserStorageException
+import org.tinitalk.admin.server.ServerUserCredential
 import org.tinitalk.admin.server.ServerUsersReader
 import org.tinitalk.admin.server.TiniTalkHealthChecker
 import org.tinitalk.admin.server.TiniTalkHealthHttpException
@@ -142,7 +143,7 @@ data class AddServerUserState(
     val loginError: String? = null,
     val displayNameError: String? = null,
     val errorMessage: String? = null,
-    val token: String? = null,
+    val credential: ServerUserCredential? = null,
 )
 
 data class ServerUserDetailsUiState(
@@ -154,7 +155,7 @@ data class ServerUserDetailsUiState(
     val renameDraft: String = "",
     val renameErrorMessage: String? = null,
     val errorMessage: String? = null,
-    val token: String? = null,
+    val credential: ServerUserCredential? = null,
 ) {
     val busy: Boolean
         get() = deleting || rotatingToken || changingAccess || renaming
@@ -449,7 +450,7 @@ class AdminViewModel(
     fun closeAddServerUser() {
         val route = mutableState.value.route as? AdminRoute.AddServerUser ?: return
         val add = mutableState.value.addServerUser
-        if (add.submitting || add.token != null) return
+        if (add.submitting || add.credential != null) return
         addServerUserJob?.cancel()
         addServerUserJob = null
         mutableState.update {
@@ -477,7 +478,7 @@ class AdminViewModel(
         val route = mutableState.value.route as? AdminRoute.AddServerUser ?: return
         val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
         val form = mutableState.value.addServerUser
-        if (form.token != null) return
+        if (form.credential != null) return
         val login = form.login.trim()
         val displayName = form.displayName.trim()
         val loginError = when {
@@ -547,7 +548,7 @@ class AdminViewModel(
                             ),
                             addServerUser = state.addServerUser.copy(
                                 submitting = false,
-                                token = added.token,
+                                credential = added.credential,
                             ),
                         )
                     }
@@ -573,7 +574,7 @@ class AdminViewModel(
 
     fun serverUserTokenCopied() {
         val route = mutableState.value.route as? AdminRoute.AddServerUser ?: return
-        if (mutableState.value.addServerUser.token == null) return
+        if (mutableState.value.addServerUser.credential == null) return
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerUsers(route.serverId),
@@ -596,7 +597,7 @@ class AdminViewModel(
     fun closeServerUser() {
         val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
         val details = mutableState.value.serverUserDetails
-        if (details.busy || details.token != null) return
+        if (details.busy || details.credential != null) return
         mutableState.update {
             it.copy(
                 route = AdminRoute.ServerUsers(route.serverId),
@@ -611,7 +612,7 @@ class AdminViewModel(
             rotateServerUserTokenJob?.isActive == true ||
             changeServerUserAccessJob?.isActive == true ||
             renameServerUserJob?.isActive == true ||
-            mutableState.value.serverUserDetails.token != null
+            mutableState.value.serverUserDetails.credential != null
         ) return
         val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
         val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
@@ -669,7 +670,7 @@ class AdminViewModel(
             deleteServerUserJob?.isActive == true ||
             changeServerUserAccessJob?.isActive == true ||
             renameServerUserJob?.isActive == true ||
-            mutableState.value.serverUserDetails.token != null
+            mutableState.value.serverUserDetails.credential != null
         ) return
         val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
         val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
@@ -678,7 +679,7 @@ class AdminViewModel(
         }
         rotateServerUserTokenJob = viewModelScope.launch {
             try {
-                val token = withContext(Dispatchers.IO) {
+                val credential = withContext(Dispatchers.IO) {
                     val connection = connectToServer(server)
                     try {
                         serverUsersReader.rotateToken(
@@ -693,7 +694,7 @@ class AdminViewModel(
                 if (mutableState.value.route == route) {
                     mutableState.update {
                         it.copy(
-                            serverUserDetails = ServerUserDetailsUiState(token = token),
+                            serverUserDetails = ServerUserDetailsUiState(credential = credential),
                         )
                     }
                 }
@@ -718,7 +719,7 @@ class AdminViewModel(
     fun serverUserRotatedTokenCopied() {
         if (
             mutableState.value.route !is AdminRoute.ServerUserDetails ||
-            mutableState.value.serverUserDetails.token == null
+            mutableState.value.serverUserDetails.credential == null
         ) return
         mutableState.update {
             it.copy(serverUserDetails = ServerUserDetailsUiState())
@@ -731,7 +732,7 @@ class AdminViewModel(
             rotateServerUserTokenJob?.isActive == true ||
             deleteServerUserJob?.isActive == true ||
             renameServerUserJob?.isActive == true ||
-            mutableState.value.serverUserDetails.token != null
+            mutableState.value.serverUserDetails.credential != null
         ) return
         val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
         val server = mutableState.value.servers.firstOrNull { it.id == route.serverId } ?: return
@@ -789,7 +790,7 @@ class AdminViewModel(
     fun openServerUserRename() {
         val route = mutableState.value.route as? AdminRoute.ServerUserDetails ?: return
         val details = mutableState.value.serverUserDetails
-        if (details.busy || details.token != null) return
+        if (details.busy || details.credential != null) return
         val user = mutableState.value.serverUsers.users
             .firstOrNull { it.login == route.user.login } ?: route.user
         mutableState.update {
@@ -843,7 +844,7 @@ class AdminViewModel(
         val user = mutableState.value.serverUsers.users
             .firstOrNull { it.login == route.user.login } ?: route.user
         val details = mutableState.value.serverUserDetails
-        if (!details.renameDialogVisible || details.token != null) return
+        if (!details.renameDialogVisible || details.credential != null) return
         val displayName = details.renameDraft.trim()
         val validationError = when {
             displayName.isEmpty() -> "Укажите имя"
@@ -930,7 +931,7 @@ class AdminViewModel(
 
     private fun updateAddServerUser(transform: AddServerUserState.() -> AddServerUserState) {
         val add = mutableState.value.addServerUser
-        if (mutableState.value.route !is AdminRoute.AddServerUser || add.submitting || add.token != null) {
+        if (mutableState.value.route !is AdminRoute.AddServerUser || add.submitting || add.credential != null) {
             return
         }
         mutableState.update { it.copy(addServerUser = add.transform()) }

@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.nativeClipboardManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import org.tinitalk.admin.server.ServerUserCredential
 
 @Composable
 fun AddServerUserScreen(
@@ -43,7 +44,7 @@ fun AddServerUserScreen(
     onTokenCopied: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val formEnabled = !state.submitting && state.token == null
+    val formEnabled = !state.submitting && state.credential == null
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier
@@ -109,12 +110,12 @@ fun AddServerUserScreen(
         Spacer(Modifier.height(12.dp))
     }
 
-    state.token?.let { token ->
+    state.credential?.let { credential ->
         ServerUserTokenDialog(
             title = "Пользователь добавлен",
             login = state.login,
             serverAddress = serverAddress,
-            token = token,
+            credential = credential,
             onTokenCopied = onTokenCopied,
         )
     }
@@ -125,13 +126,13 @@ fun ServerUserTokenDialog(
     title: String,
     login: String,
     serverAddress: String,
-    token: String,
+    credential: ServerUserCredential,
     onTokenCopied: () -> Unit,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboard.current
-    val accessText = remember(login, serverAddress, token) {
-        "${login.trim()}@${serverAddress.trim()}\n$token"
+    val accessText = remember(login, serverAddress, credential) {
+        "${login.trim()}@${serverAddress.trim()}\n${credential.value}"
     }
     // Compose checks this public Android-specific type before opening the selection menu.
     @SuppressLint("VisibleForTests")
@@ -156,7 +157,12 @@ fun ServerUserTokenDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Сохраните пароль сейчас. После закрытия посмотреть его снова будет невозможно.",
+                    if (credential.temporary) {
+                        "Это временный пароль. При первом входе пользователь задаст собственный. " +
+                            "Передайте пароль сейчас: после закрытия посмотреть его снова будет невозможно."
+                    } else {
+                        "Сохраните пароль сейчас. После закрытия посмотреть его снова будет невозможно."
+                    },
                 )
                 // Protect selection-menu, keyboard and accessibility copies from this field only.
                 CompositionLocalProvider(LocalClipboard provides tokenClipboard) {

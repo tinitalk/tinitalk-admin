@@ -69,7 +69,7 @@ fun ServerUserDetailsScreen(
     val renameFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
-    val actionsEnabled = !state.busy && state.token == null
+    val actionsEnabled = !state.busy && state.credential == null
 
     LaunchedEffect(state.renameDialogVisible) {
         if (state.renameDialogVisible) {
@@ -315,9 +315,9 @@ fun ServerUserDetailsScreen(
             title = { Text("Сменить пароль?") },
             text = {
                 Text(
-                    "Текущий пароль сразу перестанет работать. Пользователь потеряет доступ, " +
-                        "а привязанные устройства будут удалены. Отменить действие и восстановить " +
-                        "старый пароль нельзя. Новый пароль будет показан только один раз.",
+                    "Текущие данные для входа сразу перестанут работать, а привязанные устройства " +
+                        "будут удалены. Отменить действие нельзя. Новые данные для входа будут " +
+                        "показаны только один раз.",
                 )
             },
             confirmButton = {
@@ -385,12 +385,12 @@ fun ServerUserDetailsScreen(
         )
     }
 
-    state.token?.let { token ->
+    state.credential?.let { credential ->
         ServerUserTokenDialog(
             title = "Новый пароль готов",
             login = user.login,
             serverAddress = serverAddress,
-            token = token,
+            credential = credential,
             onTokenCopied = onTokenCopied,
         )
     }

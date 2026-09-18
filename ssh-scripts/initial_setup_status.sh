@@ -40,6 +40,7 @@ firewall_ready() {
         firewall_rule_present "3478/udp" &&
         firewall_rule_present "5349/tcp" &&
         firewall_rule_present "49152:49663/udp" &&
+        [ "$(sysctl -n net.core.rmem_max)" -ge 4194304 ] &&
         sysctl -n net.ipv4.ip_local_reserved_ports |
             tr ',' '\n' |
             awk -F- '
@@ -74,6 +75,8 @@ binary_ready() {
 service_ready() {
     [ -s /var/lib/tinitalk/state.db ] &&
         systemctl cat tinitalk.service >/dev/null 2>&1 &&
+        systemctl cat tinitalk.service |
+            grep -q -- '--turn-udp-read-buffer 4194304' &&
         systemctl is-enabled --quiet tinitalk.service 2>/dev/null &&
         systemctl is-active --quiet tinitalk.service
 }

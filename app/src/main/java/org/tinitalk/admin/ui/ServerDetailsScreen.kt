@@ -1,5 +1,7 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -161,7 +163,7 @@ fun ServerDetailsScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             ScreenHeader(
-                title = "Сервер",
+                title = appString(R.string.text_server_113),
                 onBack = onBack,
                 actions = {
                     Box {
@@ -176,7 +178,7 @@ fun ServerDetailsScreen(
                                 enabled = actionsEnabled,
                                 text = {
                                     Text(
-                                        text = "Удалить из приложения",
+                                        text = appString(R.string.text_remove_from_app_114),
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                 },
@@ -195,7 +197,7 @@ fun ServerDetailsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = server.displayName.ifEmpty { "Без названия" },
+                    text = server.displayName.ifEmpty { appString(R.string.text_unnamed_115) },
                     color = if (server.displayName.isEmpty()) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
@@ -230,10 +232,10 @@ fun ServerDetailsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         ServerProperty(
-                            label = "Адрес",
+                            label = appString(R.string.text_address_116),
                             value = server.enteredAddress,
                             onValueClick = {
-                                copyPlainText(context, "TiniTalk server address", server.enteredAddress)
+                                copyPlainText(context, appString(R.string.text_address_116), server.enteredAddress)
                             },
                             modifier = Modifier.weight(1f),
                         )
@@ -250,12 +252,12 @@ fun ServerDetailsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         ServerProperty(
-                            label = "SSH-порт",
+                            label = appString(R.string.text_ssh_port_11),
                             value = server.sshPort.toString(),
                             modifier = Modifier.weight(1f),
                         )
                         ServerProperty(
-                            label = "Пользователь",
+                            label = appString(R.string.text_user_117),
                             value = server.sshLogin,
                             modifier = Modifier.weight(1f),
                         )
@@ -276,7 +278,7 @@ fun ServerDetailsScreen(
             )
             if (initialSetup.mode == InitialSetupUiMode.CONFIGURED) {
                 SetupActionButton(
-                    label = "Пользователи",
+                    label = appString(R.string.text_users_118),
                     enabled = actionsEnabled,
                     iconResource = R.drawable.ic_contacts,
                     onClick = onOpenUsers,
@@ -286,8 +288,8 @@ fun ServerDetailsScreen(
                         elapsedSeconds = serverOperationElapsedSeconds,
                     )
                     TiniTalkUpdateUiMode.FAILED -> TiniTalkUpdateFailure(
-                        message = tinitalkUpdate.errorMessage
-                            ?: "Не удалось получить состояние обновления",
+                        message = tinitalkUpdate.errorMessage?.resolve()
+                            ?: appString(R.string.text_could_not_get_update_status_119),
                         enabled = !serverConnectivity.inProgress &&
                             !serverOperationInProgress &&
                             !setupBusy &&
@@ -297,7 +299,7 @@ fun ServerDetailsScreen(
                     TiniTalkUpdateUiMode.IDLE,
                     TiniTalkUpdateUiMode.SELECTING,
                     -> SetupActionButton(
-                        label = "Обновить TiniTalk",
+                        label = appString(R.string.text_update_tinitalk_120),
                         enabled = actionsEnabled,
                         iconResource = R.drawable.ic_update,
                         onClick = onOpenTiniTalkUpdate,
@@ -310,10 +312,10 @@ fun ServerDetailsScreen(
     if (binarySelection.visible) {
         AlertDialog(
             onDismissRequest = onCloseTiniTalkBinary,
-            title = { Text("Первичная настройка") },
+            title = { Text(appString(R.string.text_initial_setup_121)) },
             text = {
                 FileSelectionButton(
-                    label = "Бинарник TiniTalk Server",
+                    label = appString(R.string.text_tinitalk_server_binary_122),
                     fileName = binarySelection.binaryName,
                     onClick = onChooseTiniTalkBinary,
                 )
@@ -323,12 +325,12 @@ fun ServerDetailsScreen(
                     onClick = onStartInitialSetup,
                     enabled = binarySelection.ready,
                 ) {
-                    Text("Начать")
+                    Text(appString(R.string.text_start_123))
                 }
             },
             dismissButton = {
                 TextButton(onClick = onCloseTiniTalkBinary) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -337,15 +339,14 @@ fun ServerDetailsScreen(
     if (tinitalkUpdate.mode == TiniTalkUpdateUiMode.SELECTING) {
         AlertDialog(
             onDismissRequest = onCloseTiniTalkUpdate,
-            title = { Text("Обновить TiniTalk") },
+            title = { Text(appString(R.string.text_update_tinitalk_120)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(
-                        "Во время обновления сервис ненадолго остановится. " +
-                            "Перед заменой будут сохранены текущий бинарник и база данных.",
+                        appString(R.string.text_the_service_will_stop_briefly_during_the_update_the_curr_124),
                     )
                     FileSelectionButton(
-                        label = "Новый бинарник TiniTalk Server",
+                        label = appString(R.string.text_new_tinitalk_server_binary_125),
                         fileName = tinitalkUpdate.binaryName,
                         onClick = onChooseTiniTalkUpdateBinary,
                     )
@@ -356,12 +357,12 @@ fun ServerDetailsScreen(
                     onClick = onStartTiniTalkUpdate,
                     enabled = tinitalkUpdate.ready,
                 ) {
-                    Text("Обновить")
+                    Text(appString(R.string.text_update_126))
                 }
             },
             dismissButton = {
                 TextButton(onClick = onCloseTiniTalkUpdate) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -370,12 +371,12 @@ fun ServerDetailsScreen(
     if (renameDialogVisible) {
         AlertDialog(
             onDismissRequest = { renameDialogVisible = false },
-            title = { Text("Название сервера") },
+            title = { Text(appString(R.string.text_server_name_127)) },
             text = {
                 OutlinedTextField(
                     value = nameDraft,
                     onValueChange = { nameDraft = it },
-                    label = { Text("Название") },
+                    label = { Text(appString(R.string.text_name_128)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().focusRequester(renameFocusRequester),
                 )
@@ -387,12 +388,12 @@ fun ServerDetailsScreen(
                         renameDialogVisible = false
                     },
                 ) {
-                    Text("Сохранить")
+                    Text(appString(R.string.text_save_129))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { renameDialogVisible = false }) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -401,9 +402,9 @@ fun ServerDetailsScreen(
     if (deleteDialogVisible) {
         AlertDialog(
             onDismissRequest = { deleteDialogVisible = false },
-            title = { Text("Удалить сервер?") },
+            title = { Text(appString(R.string.text_remove_server_130)) },
             text = {
-                Text("Сервер будет удалён только из приложения. На VPS ничего не изменится.")
+                Text(appString(R.string.text_the_server_will_only_be_removed_from_the_app_nothing_on_131))
             },
             confirmButton = {
                 TextButton(
@@ -415,12 +416,12 @@ fun ServerDetailsScreen(
                         contentColor = MaterialTheme.colorScheme.error,
                     ),
                 ) {
-                    Text("Удалить")
+                    Text(appString(R.string.text_delete_132))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteDialogVisible = false }) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -429,7 +430,7 @@ fun ServerDetailsScreen(
     if (serverConnectivity.visible) {
         AlertDialog(
             onDismissRequest = onDismissConnectivity,
-            title = { Text("Доступность сервера") },
+            title = { Text(appString(R.string.text_server_availability_133)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SshConnectivitySection(serverConnectivity.ssh)
@@ -438,7 +439,7 @@ fun ServerDetailsScreen(
             },
             confirmButton = {
                 TextButton(onClick = onDismissConnectivity) {
-                    Text("Закрыть")
+                    Text(appString(R.string.text_close_134))
                 }
             },
         )
@@ -451,37 +452,37 @@ private fun SshConnectivitySection(status: SshConnectivityStatus) {
     ConnectivitySection {
         when (status) {
             SshConnectivityStatus.Checking -> ConnectivityStatusRow(
-                message = "Проверяем SSH-доступ…",
+                message = appString(R.string.text_checking_ssh_access_135),
                 checking = true,
             )
             is SshConnectivityStatus.Unavailable -> ConnectivityStatusRow(
-                message = status.message,
+                message = status.message.resolve(),
                 available = false,
             )
             is SshConnectivityStatus.Available -> {
-                ConnectivityStatusRow(message = "SSH-доступ работает", available = true)
+                ConnectivityStatusRow(message = appString(R.string.text_ssh_access_is_working_136), available = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     ServerProperty(
-                        "Пользователь",
+                        appString(R.string.text_user_117),
                         status.details.user,
                         modifier = Modifier.weight(1f),
                         highlightValue = true,
                     )
                     ServerProperty(
-                        "Сервер",
+                        appString(R.string.text_server_113),
                         status.details.host,
                         modifier = Modifier.weight(1f),
                         highlightValue = true,
                     )
                 }
-                ServerProperty("Время работы", status.details.uptime, highlightValue = true)
+                ServerProperty(appString(R.string.text_uptime_137), status.details.uptime, highlightValue = true)
                 ServerProperty(
-                    "Операционная система",
+                    appString(R.string.text_operating_system_138),
                     status.details.operatingSystem,
                     highlightValue = true,
                 )
                 ServerProperty(
-                    "Архитектура",
+                    appString(R.string.text_architecture_139),
                     status.details.architecture,
                     highlightValue = true,
                 )
@@ -495,25 +496,25 @@ private fun TiniTalkApiConnectivitySection(status: TiniTalkApiConnectivityStatus
     ConnectivitySection {
         when (status) {
             TiniTalkApiConnectivityStatus.Checking -> ConnectivityStatusRow(
-                message = "Проверяем TiniTalk API по HTTPS…",
+                message = appString(R.string.text_checking_the_tinitalk_api_over_https_140),
                 checking = true,
             )
             is TiniTalkApiConnectivityStatus.Unavailable -> ConnectivityStatusRow(
-                message = status.message,
+                message = status.message.resolve(),
                 available = false,
             )
             is TiniTalkApiConnectivityStatus.Available -> {
-                ConnectivityStatusRow(message = "Сервер TiniTalk доступен", available = true)
+                ConnectivityStatusRow(message = appString(R.string.text_the_tinitalk_server_is_available_141), available = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     ServerProperty(
-                        "Версия API",
-                        status.details.apiVersion?.toString() ?: "Не указана",
+                        appString(R.string.text_api_version_142),
+                        status.details.apiVersion?.toString() ?: appString(R.string.text_not_specified_143),
                         modifier = Modifier.weight(1f),
                         highlightValue = true,
                     )
                     ServerProperty(
-                        "Коммит",
-                        status.details.commit ?: "Не указан",
+                        appString(R.string.text_commit_144),
+                        status.details.commit ?: appString(R.string.text_not_specified_145),
                         modifier = Modifier.weight(1f),
                         highlightValue = true,
                     )
@@ -623,8 +624,8 @@ private fun InitialSetupCard(
         ) {
             when (state.mode) {
                 InitialSetupUiMode.UNKNOWN -> {
-                    Text("Сервер не настроен", style = MaterialTheme.typography.titleMedium)
-                    SetupActionButton("Запустить настройку", actionsEnabled, onCheckAndStart)
+                    Text(appString(R.string.text_server_not_configured_146), style = MaterialTheme.typography.titleMedium)
+                    SetupActionButton(appString(R.string.text_start_setup_147), actionsEnabled, onCheckAndStart)
                 }
 
                 InitialSetupUiMode.CHECKING -> Row(
@@ -632,16 +633,16 @@ private fun InitialSetupCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                    Text("Проверяем сервер…", style = MaterialTheme.typography.titleMedium)
+                    Text(appString(R.string.text_checking_server_148), style = MaterialTheme.typography.titleMedium)
                 }
 
                 InitialSetupUiMode.CLEAN -> {
-                    Text("Сервер чистый", style = MaterialTheme.typography.titleMedium)
-                    SetupActionButton("Запустить первичную настройку", actionsEnabled, onStart)
+                    Text(appString(R.string.text_server_is_clean_149), style = MaterialTheme.typography.titleMedium)
+                    SetupActionButton(appString(R.string.text_start_initial_setup_150), actionsEnabled, onStart)
                 }
 
                 InitialSetupUiMode.PARTIAL -> {
-                    Text("Настройка не завершена", style = MaterialTheme.typography.titleMedium)
+                    Text(appString(R.string.text_setup_incomplete_151), style = MaterialTheme.typography.titleMedium)
                     InitialSetupStep.entries.forEach { step ->
                         InitialSetupStepRow(
                             step = step,
@@ -651,7 +652,7 @@ private fun InitialSetupCard(
                             stepElapsedSeconds = 0,
                         )
                     }
-                    SetupActionButton("Продолжить настройку", actionsEnabled, onStart)
+                    SetupActionButton(appString(R.string.text_continue_setup_152), actionsEnabled, onStart)
                 }
 
                 InitialSetupUiMode.RUNNING,
@@ -659,10 +660,9 @@ private fun InitialSetupCard(
                 -> {
                     Text(
                         text = if (state.mode == InitialSetupUiMode.RUNNING) {
-                            "Идёт настройка сервера · " +
-                                setupElapsedSeconds.asElapsedTime()
+                            appString(R.string.text_setting_up_server_153, setupElapsedSeconds.asElapsedTime())
                         } else {
-                            "Настройка остановлена"
+                            appString(R.string.text_setup_stopped_154)
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -678,13 +678,13 @@ private fun InitialSetupCard(
                     }
                     state.errorMessage?.let {
                         Text(
-                            text = it,
+                            text = it.resolve(),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                     if (state.mode == InitialSetupUiMode.FAILED) {
-                        SetupActionButton("Повторить", actionsEnabled, onRetry)
+                        SetupActionButton(appString(R.string.text_retry_155), actionsEnabled, onRetry)
                     }
                 }
 
@@ -694,7 +694,7 @@ private fun InitialSetupCard(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            "Сервер настроен",
+                            appString(R.string.text_server_configured_156),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
@@ -708,15 +708,15 @@ private fun InitialSetupCard(
 
                 InitialSetupUiMode.SSH_HOST_KEY_CHANGED -> {
                     Text(
-                        "SSH fingerprint изменился",
+                        appString(R.string.text_ssh_fingerprint_changed_157),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    ServerProperty("Сохранённый fingerprint", expectedFingerprint)
+                    ServerProperty(appString(R.string.text_saved_fingerprint_158), expectedFingerprint)
                     ServerProperty(
-                        "Новый fingerprint",
-                        state.observedFingerprint ?: "Неизвестен",
+                        appString(R.string.text_new_fingerprint_159),
+                        state.observedFingerprint ?: appString(R.string.text_unknown_160),
                     )
                     if (state.hostKeyCheckInProgress) {
                         Row(
@@ -727,11 +727,11 @@ private fun InitialSetupCard(
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(20.dp),
                             )
-                            Text("Проверяем SSH fingerprint…")
+                            Text(appString(R.string.text_checking_ssh_fingerprint_161))
                         }
                     }
                     SetupActionButton(
-                        "Проверить повторно",
+                        appString(R.string.text_check_again_162),
                         !state.hostKeyCheckInProgress,
                         onRetryChangedHostKey,
                     )
@@ -754,7 +754,7 @@ private fun RefreshStatusIconButton(
     Canvas(
         modifier = Modifier
             .size(24.dp)
-            .semantics { contentDescription = "Проверить состояние сервера" }
+            .semantics { contentDescription = appString(R.string.text_check_server_status_163) }
             .clickable(enabled = enabled, onClick = onClick),
     ) {
         val stroke = Stroke(
@@ -857,7 +857,7 @@ private fun ServerCheckIconButton(
             Canvas(
                 modifier = Modifier
                     .size(24.dp)
-                    .semantics { contentDescription = "Проверить доступность сервера" },
+                    .semantics { contentDescription = appString(R.string.text_check_server_availability_164) },
             ) {
                 val stroke = Stroke(
                     width = 2.dp.toPx(),
@@ -948,7 +948,7 @@ private fun TiniTalkUpdateProgress(elapsedSeconds: Long) {
                 modifier = Modifier.size(24.dp),
             )
             Text(
-                text = "Обновляем TiniTalk · ${elapsedSeconds.asElapsedTime()}",
+                text = appString(R.string.text_updating_tinitalk_1_s_165, elapsedSeconds.asElapsedTime()),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -981,7 +981,7 @@ private fun TiniTalkUpdateFailure(
                 style = MaterialTheme.typography.bodyMedium,
             )
             SetupActionButton(
-                label = "Проверить обновление",
+                label = appString(R.string.text_check_update_166),
                 enabled = enabled,
                 onClick = onRetry,
             )
@@ -1004,7 +1004,7 @@ private fun FileSelectionButton(
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(label)
             Text(
-                text = fileName ?: "Выбрать файл",
+                text = fileName ?: appString(R.string.text_choose_file_167),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1027,13 +1027,13 @@ private fun Long.asElapsedTime(): String {
 }
 
 private fun InitialSetupStep.displayName(): String = when (this) {
-    InitialSetupStep.SYSTEM_PACKAGES -> "Системные пакеты"
-    InitialSetupStep.FIREWALL -> "Firewall"
+    InitialSetupStep.SYSTEM_PACKAGES -> appString(R.string.text_system_packages_168)
+    InitialSetupStep.FIREWALL -> appString(R.string.firewall)
     InitialSetupStep.FAIL2BAN -> "Fail2ban"
-    InitialSetupStep.TLS_CERTIFICATE -> "TLS-сертификат"
-    InitialSetupStep.PREPARE_TINITALK -> "Подготовка TiniTalk"
-    InitialSetupStep.UPLOAD_BINARY -> "Загрузка бинарника"
-    InitialSetupStep.START_TINITALK -> "Запуск TiniTalk"
+    InitialSetupStep.TLS_CERTIFICATE -> appString(R.string.text_tls_certificate_169)
+    InitialSetupStep.PREPARE_TINITALK -> appString(R.string.text_preparing_tinitalk_170)
+    InitialSetupStep.UPLOAD_BINARY -> appString(R.string.text_uploading_binary_171)
+    InitialSetupStep.START_TINITALK -> appString(R.string.text_starting_tinitalk_172)
 }
 
 @Composable

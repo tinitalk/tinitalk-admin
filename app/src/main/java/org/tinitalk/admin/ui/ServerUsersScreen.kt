@@ -1,5 +1,7 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -70,7 +72,7 @@ fun ServerUsersScreen(
             Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 var menuExpanded by remember { mutableStateOf(false) }
                 ScreenHeader(
-                    title = "Пользователи",
+                    title = appString(R.string.text_users_118),
                     onBack = onBack,
                     actions = {
                         if (!state.loading && state.errorMessage == null && state.users.isNotEmpty()) {
@@ -86,7 +88,7 @@ fun ServerUsersScreen(
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                text = "Добавить пользователя",
+                                                text = appString(R.string.text_add_user_22),
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                             )
@@ -120,15 +122,15 @@ fun ServerUsersScreen(
                 }
 
                 state.errorMessage != null -> UsersMessage(
-                    title = state.errorMessage,
-                    actionLabel = "Повторить",
+                    title = state.errorMessage.resolve(),
+                    actionLabel = appString(R.string.text_retry_155),
                     onAction = onRetry,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
 
                 state.users.isEmpty() -> UsersMessage(
-                    title = "Пользователей пока нет",
-                    actionLabel = "Добавить пользователя",
+                    title = appString(R.string.text_no_users_yet_194),
+                    actionLabel = appString(R.string.text_add_user_22),
                     onAction = onAddUser,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
@@ -270,5 +272,5 @@ private fun ServerUserRow(user: ServerUser, onClick: () -> Unit) {
 private fun userInitial(displayName: String, login: String): String {
     val value = displayName.trim().ifEmpty { login.trim() }.ifEmpty { "?" }
     val end = value.offsetByCodePoints(0, 1)
-    return value.substring(0, end).uppercase(Locale.getDefault())
+    return value.substring(0, end).uppercase(org.tinitalk.admin.i18n.AppLanguage.locale)
 }

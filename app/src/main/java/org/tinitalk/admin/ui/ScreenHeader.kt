@@ -1,10 +1,11 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
@@ -44,8 +45,8 @@ fun ScreenHeader(
             text = title,
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.weight(1f))
         actions()
     }
 }
@@ -56,7 +57,7 @@ fun MoreVertIcon() {
     Canvas(
         modifier = Modifier
             .size(24.dp)
-            .semantics { contentDescription = "Ещё" },
+            .semantics { contentDescription = appString(R.string.text_more_110) },
     ) {
         val radius = 1.8.dp.toPx()
         drawCircle(color, radius, center.copy(y = size.height * 0.25f))
@@ -70,7 +71,7 @@ fun EditIconButton(onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Icon(
             painter = painterResource(R.drawable.ic_edit),
-            contentDescription = "Изменить название",
+            contentDescription = appString(R.string.text_edit_name_111),
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(22.dp),
         )
@@ -83,7 +84,7 @@ private fun BackArrowIcon() {
     Canvas(
         modifier = Modifier
             .size(24.dp)
-            .semantics { contentDescription = "Назад" },
+            .semantics { contentDescription = appString(R.string.text_back_112) },
     ) {
         val path = Path().apply {
             moveTo(size.width * 0.83f, size.height * 0.5f)

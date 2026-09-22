@@ -19,6 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalAutofillManager
@@ -27,6 +30,7 @@ import androidx.compose.ui.unit.IntOffset
 @Composable
 fun AdminApp(viewModel: AdminViewModel) {
     val state by viewModel.state.collectAsState()
+    var aboutVisible by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val autofillManager = LocalAutofillManager.current
     val closeAddServer = {
@@ -50,9 +54,10 @@ fun AdminApp(viewModel: AdminViewModel) {
         onResult = viewModel::tinitalkUpdateBinarySelected,
     )
 
-    LaunchedEffect(state.notice) {
+    val noticeText = state.notice?.resolve()
+    LaunchedEffect(state.notice, noticeText) {
         state.notice?.let {
-            snackbarHostState.showSnackbar(it)
+            snackbarHostState.showSnackbar(it.resolve())
             viewModel.clearNotice()
         }
     }
@@ -89,6 +94,7 @@ fun AdminApp(viewModel: AdminViewModel) {
             snackbarHostState = snackbarHostState,
             onAddServer = viewModel::openAddServer,
             onOpenServer = viewModel::openServer,
+            onAbout = { aboutVisible = true },
             modifier = Modifier.fillMaxSize().systemBarsPadding(),
         )
 
@@ -300,6 +306,9 @@ fun AdminApp(viewModel: AdminViewModel) {
                 },
                 modifier = Modifier.fillMaxSize().systemBarsPadding(),
             )
+        }
+        if (aboutVisible) {
+            AboutScreen(onBack = { aboutVisible = false })
         }
     }
 }

@@ -1,5 +1,11 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+import org.tinitalk.admin.i18n.UiText
+import org.tinitalk.admin.i18n.uiText
+
+import org.tinitalk.admin.R
+
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
@@ -113,7 +119,7 @@ data class AddServerState(
     val privateKeyPassphrase: String = "",
     val privateKeySelected: Boolean = false,
     val phase: AddServerPhase = AddServerPhase.Form,
-    val errorMessage: String? = null,
+    val errorMessage: UiText? = null,
 )
 
 data class AdminUiState(
@@ -128,22 +134,22 @@ data class AdminUiState(
     val serverUserDetails: ServerUserDetailsUiState = ServerUserDetailsUiState(),
     val binarySelection: TiniTalkBinaryState = TiniTalkBinaryState(),
     val tinitalkUpdate: TiniTalkUpdateUiState = TiniTalkUpdateUiState(),
-    val notice: String? = null,
+    val notice: UiText? = null,
 )
 
 data class ServerUsersUiState(
     val loading: Boolean = false,
     val users: List<ServerUser> = emptyList(),
-    val errorMessage: String? = null,
+    val errorMessage: UiText? = null,
 )
 
 data class AddServerUserState(
     val login: String = "",
     val displayName: String = "",
     val submitting: Boolean = false,
-    val loginError: String? = null,
-    val displayNameError: String? = null,
-    val errorMessage: String? = null,
+    val loginError: UiText? = null,
+    val displayNameError: UiText? = null,
+    val errorMessage: UiText? = null,
     val credential: ServerUserCredential? = null,
 )
 
@@ -154,8 +160,8 @@ data class ServerUserDetailsUiState(
     val renaming: Boolean = false,
     val renameDialogVisible: Boolean = false,
     val renameDraft: String = "",
-    val renameErrorMessage: String? = null,
-    val errorMessage: String? = null,
+    val renameErrorMessage: UiText? = null,
+    val errorMessage: UiText? = null,
     val credential: ServerUserCredential? = null,
 ) {
     val busy: Boolean
@@ -178,7 +184,7 @@ data class InitialSetupUiState(
     val startedAtEpochMillis: Long? = null,
     val currentStep: InitialSetupStep? = null,
     val completedSteps: Set<InitialSetupStep> = emptySet(),
-    val errorMessage: String? = null,
+    val errorMessage: UiText? = null,
     val observedFingerprint: String? = null,
     val hostKeyCheckInProgress: Boolean = false,
 )
@@ -207,7 +213,7 @@ enum class TiniTalkUpdateUiMode {
 data class TiniTalkUpdateUiState(
     val mode: TiniTalkUpdateUiMode = TiniTalkUpdateUiMode.IDLE,
     val binaryName: String? = null,
-    val errorMessage: String? = null,
+    val errorMessage: UiText? = null,
 ) {
     val ready: Boolean
         get() = binaryName != null
@@ -232,13 +238,13 @@ data class SshCheckResult(
 sealed interface SshConnectivityStatus {
     data object Checking : SshConnectivityStatus
     data class Available(val details: SshCheckResult) : SshConnectivityStatus
-    data class Unavailable(val message: String) : SshConnectivityStatus
+    data class Unavailable(val message: UiText) : SshConnectivityStatus
 }
 
 sealed interface TiniTalkApiConnectivityStatus {
     data object Checking : TiniTalkApiConnectivityStatus
     data class Available(val details: TiniTalkHealthInfo) : TiniTalkApiConnectivityStatus
-    data class Unavailable(val message: String) : TiniTalkApiConnectivityStatus
+    data class Unavailable(val message: UiText) : TiniTalkApiConnectivityStatus
 }
 
 data class ServerConnectivityUiState(
@@ -274,7 +280,7 @@ class AdminViewModel(
         AdminUiState(
             servers = initialServers.getOrDefault(emptyList()),
             notice = initialServers.exceptionOrNull()?.let {
-                "Не удалось прочитать сохранённый список серверов"
+                uiText(R.string.text_could_not_read_saved_servers_29)
             },
         ),
     )
@@ -483,20 +489,20 @@ class AdminViewModel(
         val login = form.login.trim()
         val displayName = form.displayName.trim()
         val loginError = when {
-            login.isEmpty() -> "Укажите логин"
+            login.isEmpty() -> uiText(R.string.text_enter_a_username_30)
             login.length > MAX_SERVER_USER_LOGIN_LENGTH ->
-                "Логин должен быть не длиннее $MAX_SERVER_USER_LOGIN_LENGTH символов"
-            login == "--data-dir" -> "Этот логин зарезервирован"
+                uiText(R.string.text_username_must_be_no_longer_than_1_s_characters_31, MAX_SERVER_USER_LOGIN_LENGTH)
+            login == "--data-dir" -> uiText(R.string.text_this_username_is_reserved_32)
             !login.matches(SERVER_USER_LOGIN_PATTERN) ->
-                "Используйте латинские буквы, цифры, точку, дефис или подчёркивание"
+                uiText(R.string.text_use_latin_letters_digits_dots_hyphens_or_underscores_33)
             else -> null
         }
         val displayNameError = when {
-            displayName.isEmpty() -> "Укажите имя"
+            displayName.isEmpty() -> uiText(R.string.text_enter_a_name_34)
             displayName.length > MAX_SERVER_USER_DISPLAY_NAME_LENGTH ->
-                "Имя должно быть не длиннее $MAX_SERVER_USER_DISPLAY_NAME_LENGTH символов"
-            displayName == "--data-dir" -> "Выберите другое имя"
-            displayName.any(Char::isISOControl) -> "Имя содержит недопустимые символы"
+                uiText(R.string.text_name_must_be_no_longer_than_1_s_characters_35, MAX_SERVER_USER_DISPLAY_NAME_LENGTH)
+            displayName == "--data-dir" -> uiText(R.string.text_choose_another_name_36)
+            displayName.any(Char::isISOControl) -> uiText(R.string.text_the_name_contains_invalid_characters_37)
             else -> null
         }
         if (loginError != null || displayNameError != null) {
@@ -848,11 +854,11 @@ class AdminViewModel(
         if (!details.renameDialogVisible || details.credential != null) return
         val displayName = details.renameDraft.trim()
         val validationError = when {
-            displayName.isEmpty() -> "Укажите имя"
+            displayName.isEmpty() -> uiText(R.string.text_enter_a_name_34)
             displayName.length > MAX_SERVER_USER_DISPLAY_NAME_LENGTH ->
-                "Имя должно быть не длиннее $MAX_SERVER_USER_DISPLAY_NAME_LENGTH символов"
-            displayName == "--data-dir" -> "Выберите другое имя"
-            displayName.any(Char::isISOControl) -> "Имя содержит недопустимые символы"
+                uiText(R.string.text_name_must_be_no_longer_than_1_s_characters_35, MAX_SERVER_USER_DISPLAY_NAME_LENGTH)
+            displayName == "--data-dir" -> uiText(R.string.text_choose_another_name_36)
+            displayName.any(Char::isISOControl) -> uiText(R.string.text_the_name_contains_invalid_characters_37)
             else -> null
         }
         if (validationError != null) {
@@ -938,68 +944,68 @@ class AdminViewModel(
         mutableState.update { it.copy(addServerUser = add.transform()) }
     }
 
-    private fun serverUserAddErrorMessage(error: Exception): String = when (error) {
-        is ServerUserAlreadyExistsException -> "Этот логин уже занят"
+    private fun serverUserAddErrorMessage(error: Exception): UiText = when (error) {
+        is ServerUserAlreadyExistsException -> uiText(R.string.text_this_username_is_already_taken_38)
         is ServerUserAdministrativeAccessException ->
-            "Нет прав для добавления пользователя на сервере"
-        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
-        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        else -> "Не удалось добавить пользователя"
+            uiText(R.string.text_no_permission_to_add_users_on_the_server_39)
+        is ServerUserCommandUnavailableException -> uiText(R.string.text_tinitalk_command_not_found_on_the_server_40)
+        is ServerUserStorageException -> uiText(R.string.text_could_not_modify_the_user_database_41)
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
+        else -> uiText(R.string.text_could_not_add_user_45)
     }
 
-    private fun serverUserDeleteErrorMessage(error: Exception): String = when (error) {
-        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+    private fun serverUserDeleteErrorMessage(error: Exception): UiText = when (error) {
+        is ServerUserNotFoundException -> uiText(R.string.text_the_user_has_already_been_deleted_from_the_server_46)
         is ServerUserAdministrativeAccessException ->
-            "Нет прав для удаления пользователя на сервере"
-        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
-        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        else -> "Не удалось удалить пользователя"
+            uiText(R.string.text_no_permission_to_delete_users_on_the_server_47)
+        is ServerUserCommandUnavailableException -> uiText(R.string.text_tinitalk_command_not_found_on_the_server_40)
+        is ServerUserStorageException -> uiText(R.string.text_could_not_modify_the_user_database_41)
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
+        else -> uiText(R.string.text_could_not_delete_user_48)
     }
 
-    private fun serverUserTokenErrorMessage(error: Exception): String = when (error) {
-        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+    private fun serverUserTokenErrorMessage(error: Exception): UiText = when (error) {
+        is ServerUserNotFoundException -> uiText(R.string.text_the_user_has_already_been_deleted_from_the_server_46)
         is ServerUserAdministrativeAccessException ->
-            "Нет прав для смены пароля на сервере"
-        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
-        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        else -> "Не удалось сменить пароль"
+            uiText(R.string.text_no_permission_to_change_the_password_on_the_server_49)
+        is ServerUserCommandUnavailableException -> uiText(R.string.text_tinitalk_command_not_found_on_the_server_40)
+        is ServerUserStorageException -> uiText(R.string.text_could_not_modify_the_user_database_41)
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
+        else -> uiText(R.string.text_could_not_change_password_50)
     }
 
-    private fun serverUserAccessErrorMessage(error: Exception, disabling: Boolean): String = when (error) {
-        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+    private fun serverUserAccessErrorMessage(error: Exception, disabling: Boolean): UiText = when (error) {
+        is ServerUserNotFoundException -> uiText(R.string.text_the_user_has_already_been_deleted_from_the_server_46)
         is ServerUserAdministrativeAccessException ->
-            "Нет прав для изменения статуса пользователя"
-        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
-        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
+            uiText(R.string.text_no_permission_to_change_user_status_51)
+        is ServerUserCommandUnavailableException -> uiText(R.string.text_tinitalk_command_not_found_on_the_server_40)
+        is ServerUserStorageException -> uiText(R.string.text_could_not_modify_the_user_database_41)
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
         else -> if (disabling) {
-            "Не удалось заблокировать пользователя"
+            uiText(R.string.text_could_not_block_user_52)
         } else {
-            "Не удалось разблокировать пользователя"
+            uiText(R.string.text_could_not_unblock_user_53)
         }
     }
 
-    private fun serverUserRenameErrorMessage(error: Exception): String = when (error) {
-        is ServerUserNotFoundException -> "Пользователь уже удалён с сервера"
+    private fun serverUserRenameErrorMessage(error: Exception): UiText = when (error) {
+        is ServerUserNotFoundException -> uiText(R.string.text_the_user_has_already_been_deleted_from_the_server_46)
         is ServerUserAdministrativeAccessException ->
-            "Нет прав для переименования пользователя"
-        is ServerUserCommandUnavailableException -> "Команда TiniTalk не найдена на сервере"
-        is ServerUserStorageException -> "Не удалось изменить базу пользователей"
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        else -> "Не удалось переименовать пользователя"
+            uiText(R.string.text_no_permission_to_rename_users_54)
+        is ServerUserCommandUnavailableException -> uiText(R.string.text_tinitalk_command_not_found_on_the_server_40)
+        is ServerUserStorageException -> uiText(R.string.text_could_not_modify_the_user_database_41)
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
+        else -> uiText(R.string.text_could_not_rename_user_55)
     }
 
     private fun loadServerUsers(serverId: String) {
@@ -1026,7 +1032,7 @@ class AdminViewModel(
                     mutableState.update {
                         it.copy(
                             serverUsers = ServerUsersUiState(
-                                errorMessage = "Не удалось загрузить пользователей",
+                                errorMessage = uiText(R.string.text_could_not_load_users_56),
                             ),
                         )
                     }
@@ -1137,7 +1143,7 @@ class AdminViewModel(
                 mutableState.update { state ->
                     state.copy(
                         initialSetup = state.initialSetup.copy(hostKeyCheckInProgress = false),
-                        notice = "Не удалось повторно проверить SSH fingerprint",
+                        notice = uiText(R.string.text_could_not_recheck_the_ssh_fingerprint_57),
                     )
                 }
             } finally {
@@ -1455,7 +1461,7 @@ class AdminViewModel(
                             serverOperation = null,
                             initialSetup = setup.toUiState(
                                 mode = InitialSetupUiMode.FAILED,
-                                errorMessage = "Сервис TiniTalk не прошёл итоговую проверку",
+                                errorMessage = uiText(R.string.text_the_tinitalk_service_did_not_pass_the_final_check_58),
                             ),
                         )
                     }
@@ -1563,7 +1569,7 @@ class AdminViewModel(
             ?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             }
-    }.getOrNull()?.takeIf(String::isNotBlank) ?: "Выбранный файл"
+    }.getOrNull()?.takeIf(String::isNotBlank) ?: appString(R.string.text_selected_file_59)
 
     private fun preserveReadAccess(uri: Uri): Boolean = runCatching {
         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -1571,7 +1577,7 @@ class AdminViewModel(
         onSuccess = { true },
         onFailure = {
             mutableState.update {
-                it.copy(notice = "Не удалось сохранить доступ к выбранному файлу")
+                it.copy(notice = uiText(R.string.text_could_not_keep_access_to_the_selected_file_60))
             }
             false
         },
@@ -1656,7 +1662,7 @@ class AdminViewModel(
             serverUpdateStore.put(serverId, update)
         } catch (_: Exception) {
             mutableState.update {
-                it.copy(notice = "Не удалось сохранить состояние обновления")
+                it.copy(notice = uiText(R.string.text_could_not_save_update_progress_61))
             }
             return
         }
@@ -1737,7 +1743,7 @@ class AdminViewModel(
                                 } else {
                                     state.tinitalkUpdate
                                 },
-                                notice = "TiniTalk обновлён",
+                                notice = uiText(R.string.text_tinitalk_updated_62),
                             )
                         }
                     } else {
@@ -1787,7 +1793,7 @@ class AdminViewModel(
                         } else {
                             state.tinitalkUpdate
                         },
-                        notice = "Не удалось прочитать выбранный бинарник. Выберите файл ещё раз",
+                        notice = uiText(R.string.text_could_not_read_the_selected_binary_select_the_file_again_63),
                     )
                 }
             } catch (error: Exception) {
@@ -1845,7 +1851,7 @@ class AdminViewModel(
         if (mutableState.value.servers.none { it.id == serverId }) return
         val displayName = value.trim()
         viewModelScope.launch {
-            updateSavedServers("Не удалось изменить название сервера") {
+            updateSavedServers(uiText(R.string.text_could_not_rename_server_64)) {
                 serverStore.rename(serverId, displayName)
             }
         }
@@ -1869,14 +1875,14 @@ class AdminViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                mutableState.update { it.copy(notice = "Не удалось удалить сервер из приложения") }
+                mutableState.update { it.copy(notice = uiText(R.string.text_could_not_remove_server_from_the_app_65)) }
                 return@launch
             }
             mutableState.update {
                 it.copy(
                     route = AdminRoute.ServerList,
                     servers = records,
-                    notice = "Сервер удалён из приложения",
+                    notice = uiText(R.string.text_server_removed_from_the_app_66),
                 )
             }
         }
@@ -1967,47 +1973,47 @@ class AdminViewModel(
         }
     }
 
-    private fun sshCheckErrorMessage(error: Exception): String = when (error) {
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "SSH: сервер не ответил вовремя"
-        else -> "SSH-доступ недоступен"
+    private fun sshCheckErrorMessage(error: Exception): UiText = when (error) {
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_ssh_the_server_did_not_respond_in_time_67)
+        else -> uiText(R.string.text_ssh_access_unavailable_68)
     }
 
-    private fun tinitalkApiCheckErrorMessage(error: Exception): String = when (error) {
-        is InputTooLargeException -> "Ответ /healthz превышает ${error.limitBytes / 1024} КиБ"
-        is UnexpectedTiniTalkServiceException -> "По этому адресу нет сервера TiniTalk"
-        is UnhealthyTiniTalkServiceException -> "Сервер TiniTalk сообщил о недоступности"
-        is TiniTalkHealthHttpException -> "HTTPS вернул код ${error.statusCode}"
-        is SSLException -> "Не удалось проверить TLS-сертификат сервера"
-        is SocketTimeoutException -> "Сервер не ответил по HTTPS вовремя"
-        is UnknownHostException -> "Не удалось найти адрес сервера"
-        else -> "Сервер TiniTalk недоступен по HTTPS"
+    private fun tinitalkApiCheckErrorMessage(error: Exception): UiText = when (error) {
+        is InputTooLargeException -> uiText(R.string.text_the_healthz_response_exceeds_1_s_kib_69, error.limitBytes / 1024)
+        is UnexpectedTiniTalkServiceException -> uiText(R.string.text_there_is_no_tinitalk_server_at_this_address_70)
+        is UnhealthyTiniTalkServiceException -> uiText(R.string.text_the_tinitalk_server_reported_that_it_is_unavailable_71)
+        is TiniTalkHealthHttpException -> uiText(R.string.text_https_returned_code_1_s_72, error.statusCode)
+        is SSLException -> uiText(R.string.text_could_not_verify_the_server_tls_certificate_73)
+        is SocketTimeoutException -> uiText(R.string.text_the_server_did_not_respond_over_https_in_time_74)
+        is UnknownHostException -> uiText(R.string.text_could_not_resolve_the_server_address_75)
+        else -> uiText(R.string.text_the_tinitalk_server_is_unavailable_over_https_76)
     }
 
-    private fun setupErrorMessage(error: Exception): String = when (error) {
-        is RemoteOperationStatusException -> "Не удалось получить статус операции на сервере. Повторите проверку"
-        is InputTooLargeException -> "Бинарник превышает ${MAX_BINARY_BYTES / (1024 * 1024)} МиБ. Выберите файл меньшего размера"
-        is SshFailure.HostKeyChanged -> "SSH fingerprint сервера изменился"
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        is SshFailure.Transport -> "SSH-соединение прервано. Не удалось подключиться повторно"
-        else -> "Не удалось проверить или продолжить настройку сервера"
+    private fun setupErrorMessage(error: Exception): UiText = when (error) {
+        is RemoteOperationStatusException -> uiText(R.string.text_could_not_get_the_operation_status_on_the_server_try_che_77)
+        is InputTooLargeException -> uiText(R.string.text_the_binary_exceeds_1_s_mib_choose_a_smaller_file_78, MAX_BINARY_BYTES / (1024 * 1024))
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_server_ssh_fingerprint_has_changed_42)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
+        is SshFailure.Transport -> uiText(R.string.text_ssh_connection_interrupted_could_not_reconnect_79)
+        else -> uiText(R.string.text_could_not_check_or_continue_server_setup_80)
     }
 
-    private fun updateConnectionErrorMessage(error: Exception): String = when (error) {
-        is SshFailure.AuthenticationFailed -> "Сохранённый SSH-ключ отклонён сервером"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя. Обновление может ещё выполняться"
-        else -> "Не удалось запустить или проверить обновление"
+    private fun updateConnectionErrorMessage(error: Exception): UiText = when (error) {
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_the_server_rejected_the_saved_ssh_key_43)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_the_update_may_still_81)
+        else -> uiText(R.string.text_could_not_start_or_check_the_update_82)
     }
 
-    private fun updateFailureMessage(exitCode: Int?): String = when (exitCode) {
-        20 -> "Недостаточно места для резервной копии и обновления"
-        30 -> "Выбранный бинарник не подходит для этого сервера"
-        40 -> "Не удалось создать резервную копию. Сервер запущен без изменений"
-        50 -> "Новая версия не запустилась. Предыдущая версия восстановлена"
-        60 -> "Не удалось обновить TiniTalk и автоматически восстановить предыдущую версию"
-        else -> "Не удалось обновить TiniTalk"
+    private fun updateFailureMessage(exitCode: Int?): UiText = when (exitCode) {
+        20 -> uiText(R.string.text_not_enough_space_for_backup_and_update_83)
+        30 -> uiText(R.string.text_the_selected_binary_is_not_compatible_with_this_server_84)
+        40 -> uiText(R.string.text_could_not_create_backup_the_server_is_running_unchanged_85)
+        50 -> uiText(R.string.text_the_new_version_did_not_start_the_previous_version_was_r_86)
+        60 -> uiText(R.string.text_could_not_update_tinitalk_or_automatically_restore_the_p_87)
+        else -> uiText(R.string.text_could_not_update_tinitalk_88)
     }
 
     fun updateDisplayName(value: String) = updateAddServerForm { copy(displayName = value) }
@@ -2041,18 +2047,18 @@ class AdminViewModel(
             validateEndpointForm(form)
         } catch (_: EndpointValidationException) {
             mutableState.update {
-                it.copy(addServer = form.copy(errorMessage = "Проверьте адрес сервера и SSH-порт"))
+                it.copy(addServer = form.copy(errorMessage = uiText(R.string.text_check_the_server_address_and_ssh_port_89)))
             }
             return
         } catch (_: IllegalArgumentException) {
             mutableState.update {
-                it.copy(addServer = form.copy(errorMessage = "Проверьте SSH-порт и логин"))
+                it.copy(addServer = form.copy(errorMessage = uiText(R.string.text_check_the_ssh_port_and_username_90)))
             }
             return
         }
         if (form.authentication == AuthenticationMethod.PASSWORD && form.password.isEmpty()) {
             mutableState.update {
-                it.copy(addServer = form.copy(errorMessage = "Укажите SSH-пароль"))
+                it.copy(addServer = form.copy(errorMessage = uiText(R.string.text_enter_the_ssh_password_91)))
             }
             return
         }
@@ -2061,7 +2067,7 @@ class AdminViewModel(
             selectedPrivateKeyUri == null
         ) {
             mutableState.update {
-                it.copy(addServer = form.copy(errorMessage = "Выберите private key"))
+                it.copy(addServer = form.copy(errorMessage = uiText(R.string.text_select_a_private_key_92)))
             }
             return
         }
@@ -2283,7 +2289,7 @@ class AdminViewModel(
         mutableState.value = AdminUiState(
             route = AdminRoute.ServerDetails(record.id),
             servers = records,
-            notice = "Сервер добавлен",
+            notice = uiText(R.string.text_server_added_93),
         )
         inspectInitialSetup(
             serverId = record.id,
@@ -2329,18 +2335,18 @@ class AdminViewModel(
         }
     }
 
-    private fun safeErrorMessage(error: Exception): String = when (error) {
-        is DnsValidationException -> "Не удалось получить один публичный IPv4 для домена"
-        is SshFailure.HostKeyChanged -> "SSH host key изменился. Начните проверку заново"
-        is SshFailure.AuthenticationFailed -> "SSH-аутентификация не прошла"
-        is SshFailure.Timeout -> "Сервер не ответил вовремя"
-        is MissingAdministrativeAccessException -> "Нужен root или sudo без пароля"
-        is ImportedSshIdentityException -> "Не удалось прочитать SSH private key"
-        is ServerAlreadyAddedException -> "Этот сервер уже добавлен"
+    private fun safeErrorMessage(error: Exception): UiText = when (error) {
+        is DnsValidationException -> uiText(R.string.text_could_not_resolve_the_domain_to_a_single_public_ipv4_add_94)
+        is SshFailure.HostKeyChanged -> uiText(R.string.text_the_ssh_host_key_has_changed_start_the_check_again_95)
+        is SshFailure.AuthenticationFailed -> uiText(R.string.text_ssh_authentication_failed_96)
+        is SshFailure.Timeout -> uiText(R.string.text_the_server_did_not_respond_in_time_44)
+        is MissingAdministrativeAccessException -> uiText(R.string.text_root_or_passwordless_sudo_is_required_97)
+        is ImportedSshIdentityException -> uiText(R.string.text_could_not_read_the_ssh_private_key_98)
+        is ServerAlreadyAddedException -> uiText(R.string.text_this_server_has_already_been_added_99)
         is KnownHostKeyChangedException ->
-            "SSH host key отличается от сохранённого. Автоматическая замена запрещена"
-        is LocalPersistenceException -> "Не удалось сохранить сервер"
-        else -> "Не удалось настроить SSH-доступ"
+            uiText(R.string.text_the_ssh_host_key_differs_from_the_saved_key_automatic_re_100)
+        is LocalPersistenceException -> uiText(R.string.text_could_not_save_server_101)
+        else -> uiText(R.string.text_could_not_set_up_ssh_access_102)
     }
 
     private fun updateAddServerForm(transform: AddServerState.() -> AddServerState) {
@@ -2350,7 +2356,7 @@ class AdminViewModel(
     }
 
     private suspend fun updateSavedServers(
-        errorMessage: String,
+        errorMessage: UiText,
         update: () -> Unit,
     ) {
         val records = try {
@@ -2447,20 +2453,20 @@ class AdminViewModel(
     }
 }
 
-private fun ServerOperationKind.failureMessage(): String = when (this) {
-    ServerOperationKind.INSTALL_SYSTEM_PACKAGES -> "Не удалось установить системные пакеты"
-    ServerOperationKind.CONFIGURE_FIREWALL -> "Не удалось настроить firewall"
-    ServerOperationKind.SETUP_FAIL2BAN -> "Не удалось настроить Fail2ban"
-    ServerOperationKind.OBTAIN_TLS_CERTIFICATE -> "Не удалось получить TLS-сертификат"
-    ServerOperationKind.PREPARE_TINITALK -> "Не удалось подготовить TiniTalk"
-    ServerOperationKind.INSTALL_TINITALK_BINARY -> "Не удалось загрузить бинарник TiniTalk"
-    ServerOperationKind.START_TINITALK -> "Не удалось запустить TiniTalk"
-    ServerOperationKind.UPDATE_TINITALK -> "Не удалось обновить TiniTalk"
+private fun ServerOperationKind.failureMessage(): UiText = when (this) {
+    ServerOperationKind.INSTALL_SYSTEM_PACKAGES -> uiText(R.string.text_could_not_install_system_packages_103)
+    ServerOperationKind.CONFIGURE_FIREWALL -> uiText(R.string.text_could_not_configure_the_firewall_104)
+    ServerOperationKind.SETUP_FAIL2BAN -> uiText(R.string.text_could_not_configure_fail2ban_105)
+    ServerOperationKind.OBTAIN_TLS_CERTIFICATE -> uiText(R.string.text_could_not_obtain_the_tls_certificate_106)
+    ServerOperationKind.PREPARE_TINITALK -> uiText(R.string.text_could_not_prepare_tinitalk_107)
+    ServerOperationKind.INSTALL_TINITALK_BINARY -> uiText(R.string.text_could_not_upload_the_tinitalk_binary_108)
+    ServerOperationKind.START_TINITALK -> uiText(R.string.text_could_not_start_tinitalk_109)
+    ServerOperationKind.UPDATE_TINITALK -> uiText(R.string.text_could_not_update_tinitalk_88)
 }
 
 private fun StoredServerSetup.toUiState(
     mode: InitialSetupUiMode = InitialSetupUiMode.RUNNING,
-    errorMessage: String? = null,
+    errorMessage: UiText? = null,
 ) = InitialSetupUiState(
     mode = mode,
     startedAtEpochMillis = startedAtEpochMillis,

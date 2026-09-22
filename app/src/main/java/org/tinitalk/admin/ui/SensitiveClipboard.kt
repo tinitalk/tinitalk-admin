@@ -9,6 +9,8 @@ import android.os.Looper
 import android.os.PersistableBundle
 import androidx.annotation.MainThread
 import java.util.UUID
+import org.tinitalk.admin.R
+import org.tinitalk.admin.i18n.appString
 
 internal object SensitiveClipboard {
     private const val CLEAR_DELAY_MILLIS = 60_000L
@@ -18,7 +20,7 @@ internal object SensitiveClipboard {
 
     @MainThread
     fun copyToken(context: Context, token: String) {
-        copy(context, ClipData.newPlainText("TiniTalk password", token))
+        copy(context, ClipData.newPlainText(appString(R.string.text_password_14), token))
     }
 
     @MainThread

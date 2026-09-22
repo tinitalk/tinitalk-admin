@@ -6,7 +6,7 @@ plugins {
 }
 
 val repositoryDir = rootDir
-val tinitalkAdminVersion = "0.4.0"
+val tinitalkAdminVersion = "0.5.0"
 val releaseTag = providers.gradleProperty("releaseTag").orNull
 val releaseSigningPropertiesFile = rootProject.file("keystore/release.properties")
 val releaseSigningPropertiesResult = runCatching {
@@ -43,13 +43,14 @@ val commitHash = runCatching {
 android {
     namespace = "org.tinitalk.admin"
     compileSdk = 37
+    bundle { language { enableSplit = false } }
 
     defaultConfig {
         applicationId = "org.tinitalk.admin"
         minSdk = 26
         // Updating compileSdk must not opt into new runtime permission requirements.
         targetSdk = 36
-        versionCode = 4
+        versionCode = 5
         versionName = tinitalkAdminVersion
         buildConfigField("String", "COMMIT_HASH", "\"$commitHash\"")
         if (tinitalkAdminAbi == "arm64") {

@@ -1,5 +1,7 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -89,7 +91,7 @@ fun ServerUserDetailsScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             ScreenHeader(
-                title = "Пользователь",
+                title = appString(R.string.text_user_117),
                 onBack = onBack,
                 backEnabled = actionsEnabled,
                 actions = {
@@ -107,7 +109,7 @@ fun ServerUserDetailsScreen(
                         ) {
                             DropdownMenuItem(
                                 text = {
-                                    UserMenuItemText("Переименовать")
+                                    UserMenuItemText(appString(R.string.text_rename_175))
                                 },
                                 leadingIcon = {
                                     Icon(
@@ -126,7 +128,7 @@ fun ServerUserDetailsScreen(
                             )
                             DropdownMenuItem(
                                 text = {
-                                    UserMenuItemText("Сменить пароль")
+                                    UserMenuItemText(appString(R.string.text_change_password_176))
                                 },
                                 leadingIcon = {
                                     Icon(
@@ -146,7 +148,7 @@ fun ServerUserDetailsScreen(
                             DropdownMenuItem(
                                 text = {
                                     UserMenuItemText(
-                                        if (user.disabled) "Разблокировать" else "Заблокировать",
+                                        if (user.disabled) appString(R.string.text_unblock_177) else appString(R.string.text_block_178),
                                     )
                                 },
                                 leadingIcon = {
@@ -174,7 +176,7 @@ fun ServerUserDetailsScreen(
                             DropdownMenuItem(
                                 text = {
                                     UserMenuItemText(
-                                        text = "Удалить",
+                                        text = appString(R.string.text_delete_132),
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                 },
@@ -211,12 +213,12 @@ fun ServerUserDetailsScreen(
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                     modifier = Modifier.padding(18.dp),
                 ) {
-                    UserProperty(label = "Имя", value = user.displayName)
+                    UserProperty(label = appString(R.string.text_name_24), value = user.displayName)
                     UserProperty(
-                        label = "Логин",
+                        label = appString(R.string.text_username_23),
                         value = user.login,
                         onValueClick = {
-                            copyPlainText(context, "TiniTalk user login", user.login)
+                            copyPlainText(context, appString(R.string.text_username_23), user.login)
                         },
                     )
                     UserStatusProperty(disabled = user.disabled)
@@ -230,7 +232,7 @@ fun ServerUserDetailsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = message,
+                        text = message.resolve(),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(14.dp),
                     )
@@ -242,16 +244,16 @@ fun ServerUserDetailsScreen(
     if (state.renameDialogVisible) {
         AlertDialog(
             onDismissRequest = onCloseRename,
-            title = { Text("Переименовать пользователя") },
+            title = { Text(appString(R.string.text_rename_user_179)) },
             text = {
                 OutlinedTextField(
                     value = state.renameDraft,
                     onValueChange = onRenameDraftChange,
                     enabled = !state.renaming,
-                    label = { Text("Имя") },
+                    label = { Text(appString(R.string.text_name_24)) },
                     isError = state.renameErrorMessage != null,
                     supportingText = state.renameErrorMessage?.let { error ->
-                        { Text(error) }
+                        { Text(error.resolve()) }
                     },
                     singleLine = true,
                     modifier = Modifier
@@ -264,7 +266,7 @@ fun ServerUserDetailsScreen(
                     onClick = onRename,
                     enabled = !state.renaming,
                 ) {
-                    Text(if (state.renaming) "Сохраняем…" else "Сохранить")
+                    Text(if (state.renaming) appString(R.string.text_saving_180) else appString(R.string.text_save_129))
                 }
             },
             dismissButton = {
@@ -272,7 +274,7 @@ fun ServerUserDetailsScreen(
                     onClick = onCloseRename,
                     enabled = !state.renaming,
                 ) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -281,11 +283,10 @@ fun ServerUserDetailsScreen(
     if (deleteDialogVisible) {
         AlertDialog(
             onDismissRequest = { deleteDialogVisible = false },
-            title = { Text("Удалить пользователя?") },
+            title = { Text(appString(R.string.text_delete_user_181)) },
             text = {
                 Text(
-                    "Это действие нельзя отменить. " +
-                        "Будут удалены его пароль, привязанные устройства, контакты и история звонков.",
+                    appString(R.string.text_this_action_cannot_be_undone_the_user_s_password_linked_182),
                 )
             },
             confirmButton = {
@@ -298,12 +299,12 @@ fun ServerUserDetailsScreen(
                         contentColor = MaterialTheme.colorScheme.error,
                     ),
                 ) {
-                    Text("Удалить")
+                    Text(appString(R.string.text_delete_132))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteDialogVisible = false }) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -312,12 +313,10 @@ fun ServerUserDetailsScreen(
     if (rotateTokenDialogVisible) {
         AlertDialog(
             onDismissRequest = { rotateTokenDialogVisible = false },
-            title = { Text("Сменить пароль?") },
+            title = { Text(appString(R.string.text_change_password_183)) },
             text = {
                 Text(
-                    "Текущие данные для входа сразу перестанут работать, а привязанные устройства " +
-                        "будут удалены. Отменить действие нельзя. Новые данные для входа будут " +
-                        "показаны только один раз.",
+                    appString(R.string.text_the_current_sign_in_credentials_will_stop_working_immedi_184),
                 )
             },
             confirmButton = {
@@ -330,12 +329,12 @@ fun ServerUserDetailsScreen(
                         contentColor = MaterialTheme.colorScheme.error,
                     ),
                 ) {
-                    Text("Сменить")
+                    Text(appString(R.string.text_change_185))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { rotateTokenDialogVisible = false }) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -346,17 +345,14 @@ fun ServerUserDetailsScreen(
         AlertDialog(
             onDismissRequest = { accessDialogVisible = false },
             title = {
-                Text(if (blocking) "Заблокировать пользователя?" else "Разблокировать пользователя?")
+                Text(if (blocking) appString(R.string.text_block_user_186) else appString(R.string.text_unblock_user_187))
             },
             text = {
                 Text(
                     if (blocking) {
-                        "Новые авторизации, запросы и подключения пользователя будут запрещены. " +
-                            "Пароль и привязанные устройства сохранятся. Уже открытое соединение " +
-                            "может работать до отключения."
+                        appString(R.string.text_new_sign_ins_requests_and_connections_will_be_blocked_th_188)
                     } else {
-                        "Пользователь снова сможет авторизоваться с прежним паролем. " +
-                            "Сохранённые привязки устройств останутся доступны."
+                        appString(R.string.text_the_user_will_be_able_to_sign_in_again_with_the_same_pas_189)
                     },
                 )
             },
@@ -374,12 +370,12 @@ fun ServerUserDetailsScreen(
                         },
                     ),
                 ) {
-                    Text(if (blocking) "Заблокировать" else "Разблокировать")
+                    Text(if (blocking) appString(R.string.text_block_178) else appString(R.string.text_unblock_177))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { accessDialogVisible = false }) {
-                    Text("Отмена")
+                    Text(appString(R.string.text_cancel_8))
                 }
             },
         )
@@ -387,7 +383,7 @@ fun ServerUserDetailsScreen(
 
     state.credential?.let { credential ->
         ServerUserTokenDialog(
-            title = "Новый пароль готов",
+            title = appString(R.string.text_new_password_ready_190),
             login = user.login,
             serverAddress = serverAddress,
             credential = credential,
@@ -438,7 +434,7 @@ private fun UserProperty(
 private fun UserStatusProperty(disabled: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            text = "Статус",
+            text = appString(R.string.text_status_191),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -451,7 +447,7 @@ private fun UserStatusProperty(disabled: Boolean) {
                 modifier = Modifier.size(20.dp),
             )
             Text(
-                text = if (disabled) "Заблокирован" else "Включён",
+                text = if (disabled) appString(R.string.text_blocked_192) else appString(R.string.text_enabled_193),
                 color = if (disabled) {
                     MaterialTheme.colorScheme.error
                 } else {

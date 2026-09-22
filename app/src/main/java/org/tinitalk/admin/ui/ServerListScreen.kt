@@ -1,7 +1,10 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +52,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import org.tinitalk.admin.BuildConfig
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import org.tinitalk.admin.R
 import org.tinitalk.admin.model.ServerRecord
 import org.tinitalk.admin.model.displayTitle
@@ -60,6 +64,7 @@ fun ServerListScreen(
     snackbarHostState: SnackbarHostState,
     onAddServer: () -> Unit,
     onOpenServer: (String) -> Unit,
+    onAbout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -75,6 +80,7 @@ fun ServerListScreen(
             AppHeader(
                 showMenu = servers.isNotEmpty(),
                 onAddServer = onAddServer,
+                onAbout = onAbout,
             )
             if (servers.isEmpty()) {
                 EmptyServerList(
@@ -100,6 +106,7 @@ fun ServerListScreen(
 private fun AppHeader(
     showMenu: Boolean,
     onAddServer: () -> Unit,
+    onAbout: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -108,32 +115,30 @@ private fun AppHeader(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 16.dp),
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.background,
-            shape = CircleShape,
-            modifier = Modifier.size(44.dp),
+        Row(
+            modifier = Modifier.weight(1f).height(56.dp)
+                .clickable(onClick = onAbout)
+                .semantics { contentDescription = appString(R.string.text_about_102) },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Image(
-                    painter = painterResource(R.drawable.ic_launcher_foreground),
-                    contentDescription = null,
-                    modifier = Modifier.requiredSize(76.dp),
-                )
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                shape = CircleShape,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_launcher_foreground),
+                        contentDescription = null,
+                        modifier = Modifier.requiredSize(76.dp),
+                    )
+                }
             }
-        }
-        Column(
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.weight(1f),
-        ) {
             Text(
                 text = "TiniTalk Admin",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.COMMIT_HASH})",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
             )
         }
         if (showMenu) {
@@ -146,7 +151,7 @@ private fun AppHeader(
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Добавить сервер") },
+                        text = { Text(appString(R.string.text_add_server_0)) },
                         onClick = {
                             menuExpanded = false
                             onAddServer()
@@ -169,13 +174,13 @@ private fun EmptyServerList(
         modifier = modifier.padding(24.dp),
     ) {
         Text(
-            text = "Серверов пока нет",
+            text = appString(R.string.text_no_servers_yet_173),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Добавьте VPS и проверьте доступ по SSH",
+            text = appString(R.string.text_add_a_vps_and_check_ssh_access_174),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -193,7 +198,7 @@ private fun EmptyServerList(
             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
             modifier = Modifier.height(48.dp),
         ) {
-            Text("Добавить сервер")
+            Text(appString(R.string.text_add_server_0))
         }
     }
 }

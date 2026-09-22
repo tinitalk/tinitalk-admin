@@ -1,5 +1,7 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
 import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -76,7 +78,7 @@ fun AddServerScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         ScreenHeader(
-            title = "Добавить сервер",
+            title = appString(R.string.text_add_server_0),
             onBack = onBack,
             backEnabled = !operationInProgress,
         )
@@ -106,7 +108,7 @@ fun AddServerScreen(
             onPastePassphrase = { clipboardText()?.let(onPassphraseChange) },
         )
 
-        state.errorMessage?.let { ErrorPanel(it) }
+        state.errorMessage?.let { ErrorPanel(it.resolve()) }
 
         when (state.phase) {
             AddServerPhase.Form -> Button(
@@ -114,12 +116,12 @@ fun AddServerScreen(
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                Text("Добавить")
+                Text(appString(R.string.text_add_1))
             }
 
-            AddServerPhase.ScanningFingerprint -> ProgressRow("Получаем SSH fingerprint…")
+            AddServerPhase.ScanningFingerprint -> ProgressRow(appString(R.string.text_getting_ssh_fingerprint_2))
             is AddServerPhase.ConfirmFingerprint -> Unit
-            AddServerPhase.CheckingAccess -> ProgressRow("Настраиваем безопасный SSH-доступ…")
+            AddServerPhase.CheckingAccess -> ProgressRow(appString(R.string.text_setting_up_secure_ssh_access_3))
         }
         Spacer(Modifier.height(12.dp))
     }
@@ -127,11 +129,11 @@ fun AddServerScreen(
     (state.phase as? AddServerPhase.ConfirmFingerprint)?.let { phase ->
         AlertDialog(
             onDismissRequest = onRejectFingerprint,
-            title = { Text("Подтвердите SSH fingerprint") },
+            title = { Text(appString(R.string.text_confirm_ssh_fingerprint_4)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Сверьте fingerprint с данными вашего VPS-провайдера.")
-                    Text("Алгоритм", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(appString(R.string.text_compare_the_fingerprint_with_the_information_from_your_v_5))
+                    Text(appString(R.string.text_algorithm_6), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(phase.key.algorithm, fontWeight = FontWeight.SemiBold)
                     Text("SHA-256", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
@@ -145,10 +147,10 @@ fun AddServerScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = onConfirmFingerprint) { Text("Подтвердить") }
+                TextButton(onClick = onConfirmFingerprint) { Text(appString(R.string.text_confirm_7)) }
             },
             dismissButton = {
-                TextButton(onClick = onRejectFingerprint) { Text("Отмена") }
+                TextButton(onClick = onRejectFingerprint) { Text(appString(R.string.text_cancel_8)) }
             },
         )
     }
@@ -168,7 +170,7 @@ private fun EndpointFields(
         value = state.displayName,
         onValueChange = onDisplayNameChange,
         enabled = enabled,
-        label = { Text("Название (необязательно)") },
+        label = { Text(appString(R.string.text_name_optional_9)) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
@@ -176,7 +178,7 @@ private fun EndpointFields(
         value = state.address,
         onValueChange = onAddressChange,
         enabled = enabled,
-        label = { Text("IPv4-адрес или домен") },
+        label = { Text(appString(R.string.text_ipv4_address_or_domain_10)) },
         trailingIcon = if (state.address.isEmpty()) {
             { PasteButton(enabled = enabled, onClick = onPasteAddress) }
         } else {
@@ -190,7 +192,7 @@ private fun EndpointFields(
             value = state.sshPort,
             onValueChange = onPortChange,
             enabled = enabled,
-            label = { Text("SSH-порт") },
+            label = { Text(appString(R.string.text_ssh_port_11)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f),
@@ -199,7 +201,7 @@ private fun EndpointFields(
             value = state.sshLogin,
             onValueChange = onLoginChange,
             enabled = enabled,
-            label = { Text("SSH-логин") },
+            label = { Text(appString(R.string.text_ssh_username_12)) },
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
@@ -218,20 +220,20 @@ private fun CredentialsForm(
     onPastePassphrase: () -> Unit,
 ) {
     Text(
-        text = "Способ входа",
+        text = appString(R.string.text_sign_in_method_13),
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.SemiBold,
     )
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         AuthenticationButton(
-            text = "Пароль",
+            text = appString(R.string.text_password_14),
             selected = state.authentication == AuthenticationMethod.PASSWORD,
             enabled = enabled,
             onClick = { onAuthenticationChange(AuthenticationMethod.PASSWORD) },
             modifier = Modifier.weight(1f),
         )
         AuthenticationButton(
-            text = "Private key",
+            text = appString(R.string.private_key),
             selected = state.authentication == AuthenticationMethod.PRIVATE_KEY,
             enabled = enabled,
             onClick = { onAuthenticationChange(AuthenticationMethod.PRIVATE_KEY) },
@@ -243,7 +245,7 @@ private fun CredentialsForm(
             value = state.password,
             onValueChange = onPasswordChange,
             enabled = enabled,
-            label = { Text("SSH-пароль") },
+            label = { Text(appString(R.string.text_ssh_password_15)) },
             trailingIcon = if (state.password.isEmpty()) {
                 { PasteButton(enabled = enabled, onClick = onPastePassword) }
             } else {
@@ -259,7 +261,7 @@ private fun CredentialsForm(
             value = state.privateKeyPassphrase,
             onValueChange = onPassphraseChange,
             enabled = enabled,
-            label = { Text("Passphrase ключа (если есть)") },
+            label = { Text(appString(R.string.text_key_passphrase_if_any_16)) },
             trailingIcon = if (state.privateKeyPassphrase.isEmpty()) {
                 { PasteButton(enabled = enabled, onClick = onPastePassphrase) }
             } else {
@@ -275,17 +277,17 @@ private fun CredentialsForm(
             enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (state.privateKeySelected) "Выбрать другой private key" else "Выбрать private key")
+            Text(if (state.privateKeySelected) appString(R.string.text_choose_another_private_key_17) else appString(R.string.text_choose_private_key_18))
         }
         if (state.privateKeySelected) {
             Text(
-                text = "Private key выбран",
+                text = appString(R.string.text_private_key_selected_19),
                 color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
         Text(
-            text = "Файл ключа используется один раз и не сохраняется приложением.",
+            text = appString(R.string.text_the_key_file_is_used_once_and_is_not_stored_by_the_app_20),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -297,7 +299,7 @@ private fun PasteButton(enabled: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick, enabled = enabled) {
         Icon(
             painterResource(R.drawable.ic_paste),
-            contentDescription = "Вставить",
+            contentDescription = appString(R.string.text_paste_21),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

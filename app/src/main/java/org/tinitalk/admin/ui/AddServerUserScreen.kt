@@ -1,5 +1,9 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
+import org.tinitalk.admin.R
+
 import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -54,7 +58,7 @@ fun AddServerUserScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         ScreenHeader(
-            title = "Добавить пользователя",
+            title = appString(R.string.text_add_user_22),
             onBack = onBack,
             backEnabled = formEnabled,
         )
@@ -62,9 +66,9 @@ fun AddServerUserScreen(
             value = state.login,
             onValueChange = onLoginChange,
             enabled = formEnabled,
-            label = { Text("Логин") },
+            label = { Text(appString(R.string.text_username_23)) },
             isError = state.loginError != null,
-            supportingText = state.loginError?.let { error -> { Text(error) } },
+            supportingText = state.loginError?.let { error -> { Text(error.resolve()) } },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -72,9 +76,9 @@ fun AddServerUserScreen(
             value = state.displayName,
             onValueChange = onDisplayNameChange,
             enabled = formEnabled,
-            label = { Text("Имя") },
+            label = { Text(appString(R.string.text_name_24)) },
             isError = state.displayNameError != null,
-            supportingText = state.displayNameError?.let { error -> { Text(error) } },
+            supportingText = state.displayNameError?.let { error -> { Text(error.resolve()) } },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -85,7 +89,7 @@ fun AddServerUserScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = message,
+                    text = message.resolve(),
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(14.dp),
                 )
@@ -104,7 +108,7 @@ fun AddServerUserScreen(
                     modifier = Modifier.size(24.dp),
                 )
             } else {
-                Text("Добавить")
+                Text(appString(R.string.text_add_1))
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -112,7 +116,7 @@ fun AddServerUserScreen(
 
     state.credential?.let { credential ->
         ServerUserTokenDialog(
-            title = "Пользователь добавлен",
+            title = appString(R.string.text_user_added_25),
             login = state.login,
             serverAddress = serverAddress,
             credential = credential,
@@ -158,10 +162,9 @@ fun ServerUserTokenDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     if (credential.temporary) {
-                        "Это временный пароль. При первом входе пользователь задаст собственный. " +
-                            "Передайте пароль сейчас: после закрытия посмотреть его снова будет невозможно."
+                        appString(R.string.text_this_is_a_temporary_password_the_user_will_set_their_own_26)
                     } else {
-                        "Сохраните пароль сейчас. После закрытия посмотреть его снова будет невозможно."
+                        appString(R.string.text_save_the_password_now_you_cannot_view_it_again_after_clo_27)
                     },
                 )
                 // Protect selection-menu, keyboard and accessibility copies from this field only.
@@ -187,7 +190,7 @@ fun ServerUserTokenDialog(
                     onTokenCopied()
                 },
             ) {
-                Text("Скопировать")
+                Text(appString(R.string.text_copy_28))
             }
         },
     )

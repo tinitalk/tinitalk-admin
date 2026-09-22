@@ -1,5 +1,9 @@
 package org.tinitalk.admin.ui
 
+import org.tinitalk.admin.i18n.appString
+
+import org.tinitalk.admin.R
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -19,7 +23,7 @@ fun ServerUserStatusIcon(disabled: Boolean, modifier: Modifier = Modifier) {
     val color = if (disabled) MaterialTheme.colorScheme.error else AccessVerifiedGreen
     Canvas(
         modifier = modifier.semantics {
-            contentDescription = if (disabled) "Пользователь заблокирован" else "Пользователь включён"
+            contentDescription = if (disabled) appString(R.string.text_user_blocked_195) else appString(R.string.text_user_enabled_196)
         },
     ) {
         val strokeWidth = 2.dp.toPx()

@@ -1,8 +1,16 @@
 package org.tinitalk.admin.ui.theme
 
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import org.tinitalk.admin.i18n.AppLanguage
 import androidx.compose.ui.graphics.Color
 
 val BrandGold = Color(0xFFD4AF37)
@@ -31,8 +39,23 @@ private val AdminColors = darkColorScheme(
 
 @Composable
 fun TiniTalkAdminTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = AdminColors,
-        content = content,
-    )
+    // Resolve the Activity owner before replacing its context with localized resources.
+    val activityResultOwner = checkNotNull(LocalActivityResultRegistryOwner.current)
+    val base = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val locale = AppLanguage.locale
+    val localized = remember(base, configuration, locale) { AppLanguage.context(base) }
+    val direction = if (localized.resources.configuration.layoutDirection == android.view.View.LAYOUT_DIRECTION_RTL) {
+        LayoutDirection.Rtl
+    } else {
+        LayoutDirection.Ltr
+    }
+    CompositionLocalProvider(
+        LocalActivityResultRegistryOwner provides activityResultOwner,
+        LocalContext provides localized,
+        LocalConfiguration provides localized.resources.configuration,
+        LocalLayoutDirection provides direction,
+    ) {
+        MaterialTheme(colorScheme = AdminColors, content = content)
+    }
 }
